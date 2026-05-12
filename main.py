@@ -252,11 +252,6 @@ GEMINI_SYSTEM_PROMPT = (
 # ⚙️ إعدادات عامة — تقدر تعدل هنا بسهولة
 # ============================================================
 
-# عدد الرسائل اللي تخلي البوت يتدخل (كل X رسالة خلال ساعة)
-SPAM_THRESHOLD = 30
-
-# مدة النافذة الزمنية بالثواني (3600 = ساعة واحدة)
-SPAM_WINDOW_SECONDS = 3600
 
 # ============================================================
 # 🚫 نظام التحذير والتجاهل عند الكلام غير اللائق مع اميرة
@@ -435,49 +430,6 @@ BOT_TRIGGER_WORDS = [
     "اميرهه", "أميرهه", "بووت", "اميروره",
 ]
 
-
-# ============================================================
-# 📚 كلمات طلب المواد الدراسية
-# ============================================================
-STUDY_MATERIALS_KEYWORDS = [
-    "اريد ملزمة", "اريد ملزمه", "اريد ملازم", "اريد ملزما",
-    "اريد ملخص", "اريد ملخصات",
-    "اريد كتاب", "اريد كتب",
-    "اريد مسربات", "منو عنده ملزمة", "منو عنده مسربات", "منو عنده ملخص",
-    "منو عندة ملزمة", "منو عنده ملزمه", "احتاج ملزمة",
-    "منو عنده مسربات", "منو عنده ملزمة", 
-]
-
-# كلمات الطلب — تشتغل بس إذا تجتمع مع كلمة دراسية بنفس الرسالة
-STUDY_REQUEST_WORDS = ["اريد", "أريد", "ابي", "أبي", "ابغى", "أبغى"]
-
-STUDY_MATERIALS_REPLY = (
-    "📚 موجود داخل بوت الأميرة الدراسي — تحصل الي تحتاجه من ملازم وملخصات وكتب ومسربات ومحاضرات:\n\n"
-    "👉 @Mdry7bot"
-)
-
-
-def detect_session_request(text: str) -> bool:
-    """يكتشف إذا كان الشخص يريد بدء سشن دراسة."""
-    t = text.lower().strip()
-    SESSION_TRIGGERS = [
-        "سشن", "session", "pomodoro", "بومودورو",
-        "جلسة دراسة", "سشن دراسة", "ابدأ سشن", "ابدي سشن",
-        "بدء سشن", "سوي سشن", "اعملي سشن", "اعمل سشن",
-        "ابدأي سشن", "بدي سشن",
-    ]
-    for trigger in SESSION_TRIGGERS:
-        if trigger in t:
-            return True
-    return False
-
-
-def detect_study_materials_request(text: str) -> bool:
-    t = text.strip()
-    has_study_keyword = any(kw in t for kw in STUDY_MATERIALS_KEYWORDS)
-    has_request_word = any(kw in t for kw in STUDY_REQUEST_WORDS)
-    # يرد إذا: كلمة دراسية وحدها، أو كلمة طلب (أريد...) مع كلمة دراسية معها
-    return has_study_keyword or (has_request_word and has_study_keyword)
 
 
 # ============================================================
@@ -926,25 +878,6 @@ def get_smart_fallback(first_name: str, message: str) -> str:
     return None
 
 
-# ============================================================
-# 📚 ردود التسخيت — لما عضو يرسل أكثر من اللازم
-# تقدر تعدل الردود أو تضيف ردود جديدة
-# ============================================================
-STUDY_RESPONSES = [
-    "ترا صارلك ساعة تحجي، روح ادرس! ",
-    "لاحضتك اهواي تحجي؟ روح ادرس! 😅📖",
-    "روح افتح الكتاب، باجر وراك امتحان! 🎓",
-    "التسخيت هواية يضيع وقت، الدراسة أهم! 📝",
-    "الدرجات ما تجي من التلگرام! 😅 روح ادرس!",
-    "شكم رسالة ترسل؟ لو هي طاقة تخليها بالدراسة تصير أول الصف! 💪📚",
-    "روح ادرس الحجي ما يمشيك بالحياة، الشهادة تمشيك! 🎓",
-    "لاحضتك ساعة وأنت تحجي، افتحلك صفحة وادرس! 📖",
-    "روح ادرس، أهلك تعبوا عليك! 🙏",
-    "التلگرام ما يروح، بس الفرصة تروح! ادرس! ⏰📚",
-    "، لوتدرس بكد ما تحجي چان صرت دكتور! 😅🎓",
-    "اترك الحجي ساعة وادرس، بعدين ارجع! 📚✋",
-    " الاستاذ ما ينطيك درجات على الرسائل!  روح ادرس!",
-]
 
 
 # ============================================================
@@ -952,7 +885,6 @@ STUDY_RESPONSES = [
 # ============================================================
 warn_data = {}
 profanity_violations = {}
-message_timestamps: dict = {}
 
 
 # ============================================================
@@ -1061,18 +993,6 @@ def arabic_error(e: Exception) -> str:
     return "تعذّر تنفيذ الأمر — تأكد من صلاحيات البوت وحاول مجدداً"
 
 
-def track_message_and_check_spam(chat_id: int, user_id: int) -> bool:
-    key = f"{chat_id}_{user_id}"
-    now = datetime.now()
-    timestamps = message_timestamps.get(key, [])
-    cutoff = now.timestamp() - SPAM_WINDOW_SECONDS
-    timestamps = [t for t in timestamps if t > cutoff]
-    timestamps.append(now.timestamp())
-    message_timestamps[key] = timestamps
-    count = len(timestamps)
-    if count == SPAM_THRESHOLD or (count > SPAM_THRESHOLD and (count - SPAM_THRESHOLD) % 10 == 0):
-        return True
-    return False
 
 
 def is_calling_bot(text: str) -> bool:
@@ -2924,10 +2844,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await bot_youtube_response(update, context, youtube_query)
         return
 
-    if detect_study_materials_request(text):
-        await update.message.reply_text(STUDY_MATERIALS_REPLY)
-        return
-
     if is_calling_bot(text):
         replied = update.message.reply_to_message
         if (
@@ -2962,17 +2878,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(auto_reply)
                     return
 
-    if update.effective_chat and update.effective_chat.type != "private":
-        user = update.effective_user
-        chat_id = update.effective_chat.id
-        if not await is_admin_by_id(context, chat_id, user.id):
-            if track_message_and_check_spam(chat_id, user.id):
-                first_name = user.first_name
-                response = random.choice(STUDY_RESPONSES)
-                if first_name:
-                    await update.message.reply_text(f"{first_name}، {response}")
-                else:
-                    await update.message.reply_text(response)
 
     # await profanity_filter(update, context)  # موقوف مؤقتاً
 
