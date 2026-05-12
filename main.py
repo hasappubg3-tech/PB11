@@ -437,8 +437,8 @@ def contains_profanity(text: str) -> bool:
 # ============================================================
 BOT_TRIGGER_WORDS = [
     "اميرة", "أميرة", "بوت", "bot",
-    "يا اميرة", "يا أميرة", "يا بوت",
-    "اميرهه", "أميرهه", "بووت", "اميروره",
+    "يا اميرة", "يا أميرة", "امورة",
+    "اميرهه", "أميرهه", "بووت", "اموره",
 ]
 
 
@@ -2737,23 +2737,26 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if now - warning_time > timedelta(minutes=WARNING_EXPIRY_MINUTES):
             del _warned_users[user_id]
 
-    contents = _build_contents_with_history(user_id, user_message)
+    # ── الردود المحفوظة تأتي أولاً (أسرع ولا تستهلك API) ──
+    reply = get_smart_fallback(first_name, user_message)
 
-    try:
-        response = generate_with_rotation(
-            model="gemini-2.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=GEMINI_SYSTEM_PROMPT,
-                max_output_tokens=8192,
-            ),
-        )
-        reply = response.text.strip() if response.text else None
-        if not reply:
-            raise ValueError("رد فارغ من الذكاء الاصطناعي")
-    except Exception as e:
-        logger.warning(f"Gemini فشل، يستخدم الرد الاحتياطي: {e}")
-        reply = get_smart_fallback(first_name, user_message)
+    if not reply:
+        contents = _build_contents_with_history(user_id, user_message)
+        try:
+            response = generate_with_rotation(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=GEMINI_SYSTEM_PROMPT,
+                    max_output_tokens=8192,
+                ),
+            )
+            reply = response.text.strip() if response.text else None
+            if not reply:
+                raise ValueError("رد فارغ من الذكاء الاصطناعي")
+        except Exception as e:
+            logger.warning(f"Gemini فشل: {e}")
+            reply = None
 
     if not reply:
         return
@@ -3190,6 +3193,30 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(auto_reply)
                     return
 
+    # ============================================================
+    # الردود المحفوظة — تحيات وصباح ومساء والخ (تلقائي بدون استدعاء البوت)
+    # ============================================================
+    if update.effective_chat and update.effective_user:
+        _chat_for_fb = update.effective_chat
+        _cid_fb = _chat_for_fb.id
+        _allowed_fb = True
+        if _chat_for_fb.type != "private":
+            _sender_uname_fb = update.effective_user.username if update.effective_user else None
+            if not is_chat_allowed(_cid_fb, _sender_uname_fb):
+                try:
+                    _m = await context.bot.get_chat_member(_cid_fb, OWNER_CHAT_ID)
+                    _allowed_fb = _m.status in ("administrator", "creator", "member")
+                except Exception:
+                    _allowed_fb = False
+            ok_fb, _ = is_ai_allowed_for_chat(_cid_fb)
+            if not ok_fb:
+                _allowed_fb = False
+        if _allowed_fb:
+            _first_fb = update.effective_user.first_name or "أخي"
+            _fb_reply = get_smart_fallback(_first_fb, text)
+            if _fb_reply:
+                await update.message.reply_text(_fb_reply)
+                return
 
     # await profanity_filter(update, context)  # موقوف مؤقتاً
 
@@ -3303,7 +3330,7 @@ async def run_focus_timer(chat_id: int, user_id: int, minutes: int, name: str, b
         await bot.send_message(
             chat_id,
             f"🎉 {name}، انتهت جلسة منع التسخيت!\n"
-            f"يمكنك الكلام الآن 😂 — أتمنى تكون استفدت!",
+            f"يمكنك الكلام الآن — أتمنى تكون استفدت!",
         )
     except Exception:
         pass
