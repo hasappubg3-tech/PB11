@@ -2,13 +2,3 @@ python-telegram-bot==22.7
 google-genai==1.70.0
 yt-dlp==2026.3.17
 pytubefix==10.3.8
-google-genai
-python-telegram-bot
-pytubefix
-sift-stack-py
-telegram
-yt-dlp
-google-genai
-python-telegram-bot
-pytubefix
-yt-dlp
