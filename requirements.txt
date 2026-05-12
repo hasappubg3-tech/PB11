@@ -8,3 +8,7 @@ pytubefix
 sift-stack-py
 telegram
 yt-dlp
+google-genai
+python-telegram-bot
+pytubefix
+yt-dlp
