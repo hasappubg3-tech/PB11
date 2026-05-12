@@ -707,7 +707,7 @@ _MONEY_RESPONSES = [
     "الفلوس موضوع حساس، ما أقدر أساعدك فيه بدون تفاصيل.",
     "الرزق بيد الله، بس ابذل جهدك.",
     "الفلوس تجي وتروح، المهم صحتك.",
-    "مو متخصصة بالفلوس، بس ربي يرزقك.",
+    "مو متخصص بالفلوس، بس ربي يرزقك.",
     "الله يرزقك ويفتح عليك.",
 ]
 
@@ -734,17 +734,17 @@ _TECH_RESPONSES = [
 ]
 
 _MUSIC_RESPONSES = [
-    "تريد أغنية؟ جرب تقول «اميرة شغلي» واسم الأغنية.",
-    "تبي أغنية؟ قلي «اميرة شغلي» واسمها.",
-    "الأغاني عندي عبر اليوتيوب، جرب.",
-    "قل «اميرة شغلي» واسم الأغنية وأشغلها لك.",
+    "تريد أغنية؟ قلي «شغل» واسم الأغنية وأشغلها لك.",
+    "تبي أغنية؟ قلي «شغل» واسمها.",
+    "الأغاني عندي عبر اليوتيوب، قلي اسم الأغنية.",
+    "قلي «شغل» واسم الأغنية وأجيبها لك من اليوتيوب.",
 ]
 
 _GAME_RESPONSES = [
-    "الألعاب مو تخصصي.",
-    "ألعاب ما أعرف فيها هواية، بس اسأل.",
+    "الألعاب مو تخصصي، بس اسأل وأشوف.",
+    "ألعاب؟ اسأل وأحاول أساعد.",
     "الألعاب موضوع كبير، شتبي تعرف؟",
-    "أنا بوت مو لاعبة.",
+    "أنا بوت مو لاعب، بس اسأل.",
 ]
 
 _TRAVEL_RESPONSES = [
@@ -809,56 +809,55 @@ def get_smart_fallback(first_name: str, message: str) -> str:
     if len(stripped) <= 2:
         return random.choice(BOT_RESPONSES)
 
-    salam_words = ["السلام عليكم", "سلام عليكم", "السلام عليكم ورحمة الله", "السلام عليكم ورحمة الله وبركاته", "عليكم السلام", "سلام"]
-    greet_words = ["شلونك", "كيفك", "كيف حالك", "كيف الحال", "شخبارك", "شلون حالك", "عامل ايش", "عامل إيش", "شو أخبارك", "شو اخبارك"]
+    # ── كلمات التحية والاجتماعيات ──
+    salam_words = ["السلام عليكم", "سلام عليكم", "السلام عليكم ورحمة الله", "السلام عليكم ورحمة الله وبركاته", "عليكم السلام"]
     morning_words = ["صباح الخير", "صباح النور", "صباح الورد", "صباح الياسمين", "صباح العسل"]
     evening_words = ["مساء الخير", "مساء النور", "مساء الورد"]
+    greet_words = ["شلونك", "كيفك", "كيف حالك", "كيف الحال", "شخبارك", "شلون حالك", "عامل ايش", "عامل إيش", "شو أخبارك", "شو اخبارك"]
     love_words = ["احبك", "أحبك", "بحبك", "حبيبي", "وحشتني", "اشتقتلك", "اشتقت لك", "عشقتك", "احبج", "أحبج"]
-    thanks_words = ["شكرا", "شكراً", "مشكور", "يسلمو", "يسلموووو", "ممنون", "شكرن", "الله يعطيك", "تسلم يدك"]
-    compliment_words = ["شاطر", "بارع", "احسنت", "أحسنت", "ممتاز", "روعة", "تسلم", "يسلم", "بطل", "ما شاء", "ماشاءالله"]
-    farewell_words = ["مع السلامة", "باي", "الى اللقاء", "إلى اللقاء", "وداعا", "وداعاً", "تصبح", "يلا باي", "انا رايح", "أنا رايح"]
-    bored_words = ["ملل", "ماكو شغل", "فاضي", "فراغ", "وحداني", "وحيد", "ما عندي شغل", "دايخ"]
-    angry_words = ["زعلان", "غاضب", "ما عجبني", "ما نعجبني", "مو ناعجني", "حبيت كسرته", "تعصبت", "عصبي"]
-    help_words = ["ساعدني", "محتاج مساعدة", "تساعدني", "ساعد", "ابي مساعدة", "أبي مساعدة"]
-    food_words = ["اكل", "أكل", "جوعان", "مطعم", "طبخ", "وين اكل", "شنو اكل", "غداء", "عشاء", "فطور", "جاع"]
-    study_words = ["سؤال", "امتحان", "درس", "دراسة", "اختبار", "مادة", "حل", "واجب", "كلية", "جامعة", "مدرسة"]
-    sad_words = ["حزين", "زهقت", "تعبت", "مو مرتاح", "ضايق", "منهوك", "مكسور", "محطم", "بكيت", "ما عندي خلق"]
-    happy_words = ["فرحان", "مبسوط", "سعيد", "مرتاح", "نجحت", "عدت", "تخرجت", "ربحت", "الحمدلله زين"]
-    health_words = ["مريض", "تعبان", "وجع", "سخونة", "برد", "صداع", "مو بخير صحياً", "عندي الم", "عندي ألم", "دكتور"]
-    joke_words = ["نكتة", "ضحك", "اضحكني", "أضحكني", "ظريف", "حچي ظريف", "قصة مضحكة"]
-    weather_words = ["الطقس", "الجو", "حار", "بارد", "امطار", "أمطار", "مطر", "شمس", "غيوم", "برد جو"]
-    time_words = ["الساعة كم", "شنو الوقت", "كم الساعة", "الوقت كم"]
-    opinion_words = ["شتفكر", "رأيك", "رايك", "شو رايك", "ايش رأيك", "ما رأيك", "وش رأيك"]
-    religion_words = ["الله", "ربي", "دعاء", "إن شاء الله", "ان شاء الله", "الحمدلله", "سبحان الله", "ماشاء الله", "بسم الله"]
-    nosleep_words = ["ما نمت", "أرق", "سهران", "ما أقدر أنام", "مو نايم", "ليل"]
-    money_words = ["فلوس", "مال", "راتب", "قرض", "فقر", "مصاريف", "نفقات", "دخل"]
-    relationship_words = ["بنت", "حبيبة", "صاحبتي", "خطيبتي", "زوجتي", "علاقة", "تعارف", "حب"]
-    politics_words = ["سياسة", "حكومة", "رئيس", "وزير", "انتخاب", "برلمان", "احزاب", "أحزاب"]
-    tech_words = ["برنامج", "تطبيق", "موبايل", "كمبيوتر", "لابتوب", "إنترنت", "انترنت", "تقنية", "ويندوز", "ايفون", "أيفون", "اندرويد"]
-    music_words = ["أغنية", "اغنية", "موسيقى", "شغل", "غني", "مغني", "فنان", "اسمع"]
-    game_words = ["لعبة", "العب", "باب جي", "ببجي", "فورتنايت", "كلاش", "برايم", "gta", "بلايستيشن", "بي اس"]
-    travel_words = ["سفر", "رحلة", "طيارة", "فندق", "سياحة", "جواز", "تأشيرة", "تاشيرة"]
-    afraid_words = ["خايف", "خوف", "مرعوب", "قلقان", "قلق", "متوتر"]
     miss_words = ["اشتقت", "شوق", "وحشني", "غايب", "بعيد", "ما شفته"]
+    # ── ردود محددة لا تتأثر بطول الرسالة ──
+    thanks_words = ["شكرا", "شكراً", "مشكور", "يسلمو", "يسلموووو", "ممنون", "شكرن", "الله يعطيك", "تسلم يدك"]
+    compliment_words = ["شاطر", "بارع", "احسنت", "أحسنت", "ممتاز", "روعة", "تسلم", "يسلم", "بطل", "ما شاء الله", "ماشاءالله"]
+    farewell_words = ["مع السلامة", "الى اللقاء", "إلى اللقاء", "وداعا", "وداعاً", "تصبح على خير", "يلا باي", "انا رايح", "أنا رايح"]
+    sad_words = ["حزين", "زهقت", "تعبت", "مو مرتاح", "ضايق", "منهوك", "مكسور", "محطم", "بكيت", "ما عندي خلق"]
+    happy_words = ["فرحان", "مبسوط", "سعيد", "نجحت", "تخرجت", "ربحت"]
+    health_words = ["مريض", "تعبان", "وجع", "سخونة", "صداع", "عندي الم", "عندي ألم"]
+    bored_words = ["ملل", "ماكو شغل", "فاضي", "وحداني", "وحيد", "ما عندي شغل", "دايخ"]
+    angry_words = ["زعلان", "غاضب", "تعصبت", "عصبي"]
+    afraid_words = ["خايف", "خوف", "مرعوب", "قلقان", "قلق", "متوتر"]
+    nosleep_words = ["ما نمت", "أرق", "سهران", "ما أقدر أنام", "مو نايم"]
+    joke_words = ["قول نكتة", "احچيلي نكتة", "اضحكني", "أضحكني", "قصة مضحكة"]
+    music_words = ["شغل اغنية", "شغل أغنية", "ابي اغنية", "أبي أغنية", "شغل موسيقى"]
+    weather_words = ["شنو الطقس", "شو الطقس", "كيف الجو", "الطقس اليوم"]
+    time_words = ["الساعة كم", "شنو الوقت", "كم الساعة", "الوقت كم"]
+    politics_words = ["سياسة", "انتخاب", "برلمان"]
     complaint_bot_words = [
-        "تحجي اهواي", "تحجي كثير", "تكثر", "تزعجني", "تزعج",
+        "تحجي اهواي", "تحجي كثير", "تكثر", "تزعجني",
         "تسولف اهواي", "تسولف كثير", "تتكلم اهواي", "تتكلم كثير",
-        "تطول", "طويل", "ردك طويل", "كلامك كثير", "تتفلسف",
-        "تتفذلك", "ما يستاهل", "ما نريد تفسير", "بدون شرح",
+        "ردك طويل", "كلامك كثير", "تتفلسف", "بدون شرح",
     ]
+    help_words = ["ساعدني", "محتاج مساعدة", "تساعدني", "ابي مساعدة", "أبي مساعدة"]
 
-    if any(w in msg for w in salam_words):
-        return random.choice(_SALAM_RESPONSES)
-    if any(w in msg for w in morning_words):
-        return random.choice(_MORNING_RESPONSES)
-    if any(w in msg for w in evening_words):
-        return random.choice(_EVENING_RESPONSES)
-    if any(w in msg for w in greet_words):
-        return random.choice(_GREET_RESPONSES)
-    if any(w in msg for w in love_words):
-        return random.choice(_LOVE_RESPONSES)
-    if any(w in msg for w in miss_words):
-        return random.choice(_MISS_RESPONSES)
+    # ── التحيات: تشتغل فقط لو الرسالة قصيرة (≤ 40 حرف) ──
+    # هذا يمنع الكشف الخاطئ لو ظهرت الكلمة صدفة في رسالة طويلة
+    is_short_msg = len(msg.strip()) <= 40
+
+    if is_short_msg:
+        if any(w in msg for w in salam_words):
+            return random.choice(_SALAM_RESPONSES)
+        if any(w in msg for w in morning_words):
+            return random.choice(_MORNING_RESPONSES)
+        if any(w in msg for w in evening_words):
+            return random.choice(_EVENING_RESPONSES)
+        if any(w in msg for w in greet_words):
+            return random.choice(_GREET_RESPONSES)
+        if any(w in msg for w in love_words):
+            return random.choice(_LOVE_RESPONSES)
+        if any(w in msg for w in miss_words):
+            return random.choice(_MISS_RESPONSES)
+
+    # ── الردود التالية تعمل بأي طول رسالة لأنها أكثر تحديداً ──
     if any(w in msg for w in thanks_words):
         return random.choice(_THANKS_RESPONSES)
     if any(w in msg for w in compliment_words):
@@ -881,39 +880,21 @@ def get_smart_fallback(first_name: str, message: str) -> str:
         return random.choice(_NOSLEEP_RESPONSES)
     if any(w in msg for w in joke_words):
         return random.choice(_JOKE_RESPONSES)
-    if any(w in msg for w in religion_words):
-        return random.choice(_RELIGION_RESPONSES)
-    if any(w in msg for w in food_words):
-        return random.choice(_FOOD_RESPONSES)
-    if any(w in msg for w in study_words):
-        return random.choice(_STUDY_HELP_RESPONSES)
     if any(w in msg for w in music_words):
         return random.choice(_MUSIC_RESPONSES)
     if any(w in msg for w in weather_words):
         return random.choice(_WEATHER_RESPONSES)
     if any(w in msg for w in time_words):
         return random.choice(_TIME_RESPONSES)
-    if any(w in msg for w in tech_words):
-        return random.choice(_TECH_RESPONSES)
-    if any(w in msg for w in game_words):
-        return random.choice(_GAME_RESPONSES)
-    if any(w in msg for w in travel_words):
-        return random.choice(_TRAVEL_RESPONSES)
-    if any(w in msg for w in money_words):
-        return random.choice(_MONEY_RESPONSES)
-    if any(w in msg for w in relationship_words):
-        return random.choice(_RELATIONSHIP_RESPONSES)
     if any(w in msg for w in politics_words):
         return random.choice(_POLITICS_RESPONSES)
-    if any(w in msg for w in opinion_words):
-        return random.choice(_OPINION_RESPONSES)
     if any(w in msg for w in complaint_bot_words):
         return random.choice(_COMPLAINT_BOT_RESPONSES)
     if any(w in msg for w in help_words):
         return random.choice(_HELP_RESPONSES)
-    if "؟" in msg or "?" in msg:
-        return random.choice(_QUESTION_GENERAL_RESPONSES)
 
+    # الأسئلة والمواضيع العامة (دراسة، تقنية، رأي، طعام، سفر، الخ)
+    # تُترك لـ Gemini لأنه يجاوب عليها بشكل أفضل
     return None
 
 
