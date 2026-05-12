@@ -319,6 +319,17 @@ _owner_username: str = ""
 _pending_settings_input: dict = {}
 
 # ============================================================
+# 💬 نظام حفظ تاريخ المحادثات
+# ============================================================
+# {user_id: [{"role": "user"|"model", "text": str, "ts": float}]}
+_user_history: dict = {}
+
+# إعدادات الخاصية (يمكن تغييرها من لوحة الإعدادات)
+_history_enabled: bool = True          # تفعيل/إيقاف الخاصية
+_history_max_messages: int = 3         # عدد أزواج الرسائل المحفوظة (user+model = زوج)
+_history_expiry_minutes: int = 5       # مدة صلاحية الرسائل بالدقائق
+
+# ============================================================
 # نظام منع التسخيت
 # ============================================================
 
@@ -1232,6 +1243,7 @@ def _build_api_keys_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يعالج أزرار لوحة الإعدادات — للمالك فقط."""
+    global _history_enabled, _history_max_messages, _history_expiry_minutes
     query = update.callback_query
     if query.from_user.id != OWNER_CHAT_ID:
         await query.answer("❌ غير مصرح لك.", show_alert=True)
@@ -1246,6 +1258,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("👥 مشرفو البوت", callback_data="settings_admins")],
             [InlineKeyboardButton("🏘 المجموعات المسموحة", callback_data="settings_groups")],
             [InlineKeyboardButton("🤖 إعدادات الذكاء", callback_data="settings_ai")],
+            [InlineKeyboardButton("💬 إعدادات حفظ الردود", callback_data="settings_history")],
         ])
         await query.message.edit_text(
             "⚙️ *الإعدادات*\n\nاختر ما تريد تعديله:",
@@ -1484,6 +1497,170 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             "_(أرسل 0 لإلغاء الحد تماماً)_",
             parse_mode="Markdown",
         )
+        return
+
+    # ══════════════════════════════════════════════
+    # ── إعدادات حفظ الردود ──
+    # ══════════════════════════════════════════════
+    if data == "settings_history":
+        tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
+        rows = [
+            [InlineKeyboardButton(tog_lbl, callback_data="settings_hist_tog")],
+            [InlineKeyboardButton("📨 عدد الرسائل المحفوظة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 1 else ''}1", callback_data="settings_hist_n:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 2 else ''}2", callback_data="settings_hist_n:2"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 3 else ''}3", callback_data="settings_hist_n:3"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 5 else ''}5", callback_data="settings_hist_n:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 10 else ''}10", callback_data="settings_hist_n:10"),
+            ],
+            [InlineKeyboardButton("⏱ مدة الحفظ (دقائق):", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 1 else ''}1د", callback_data="settings_hist_exp:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 5 else ''}5د", callback_data="settings_hist_exp:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 10 else ''}10د", callback_data="settings_hist_exp:10"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 15 else ''}15د", callback_data="settings_hist_exp:15"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 30 else ''}30د", callback_data="settings_hist_exp:30"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 60 else ''}60د", callback_data="settings_hist_exp:60"),
+            ],
+            [InlineKeyboardButton("🗑 مسح كل التواريخ الآن", callback_data="settings_hist_clear")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        status = "مفعّل ✅" if _history_enabled else "موقوف ❌"
+        await query.message.edit_text(
+            f"💬 *إعدادات حفظ الردود*\n\n"
+            f"الحالة: {status}\n"
+            f"عدد الرسائل المحفوظة: *{_history_max_messages}* رسالة\n"
+            f"مدة الحفظ: *{_history_expiry_minutes}* دقيقة\n\n"
+            f"_البوت يحفظ آخر {_history_max_messages} رسائل لكل شخص لمدة {_history_expiry_minutes} دقيقة حتى يفهم السياق._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        await query.answer()
+        return
+
+    if data == "settings_hist_tog":
+        _history_enabled = not _history_enabled
+        await query.answer("✅ تم التفعيل" if _history_enabled else "❌ تم الإيقاف")
+        # أعد عرض الصفحة
+        tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
+        rows = [
+            [InlineKeyboardButton(tog_lbl, callback_data="settings_hist_tog")],
+            [InlineKeyboardButton("📨 عدد الرسائل المحفوظة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 1 else ''}1", callback_data="settings_hist_n:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 2 else ''}2", callback_data="settings_hist_n:2"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 3 else ''}3", callback_data="settings_hist_n:3"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 5 else ''}5", callback_data="settings_hist_n:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 10 else ''}10", callback_data="settings_hist_n:10"),
+            ],
+            [InlineKeyboardButton("⏱ مدة الحفظ (دقائق):", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 1 else ''}1د", callback_data="settings_hist_exp:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 5 else ''}5د", callback_data="settings_hist_exp:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 10 else ''}10د", callback_data="settings_hist_exp:10"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 15 else ''}15د", callback_data="settings_hist_exp:15"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 30 else ''}30د", callback_data="settings_hist_exp:30"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 60 else ''}60د", callback_data="settings_hist_exp:60"),
+            ],
+            [InlineKeyboardButton("🗑 مسح كل التواريخ الآن", callback_data="settings_hist_clear")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        status = "مفعّل ✅" if _history_enabled else "موقوف ❌"
+        await query.message.edit_text(
+            f"💬 *إعدادات حفظ الردود*\n\n"
+            f"الحالة: {status}\n"
+            f"عدد الرسائل المحفوظة: *{_history_max_messages}* رسالة\n"
+            f"مدة الحفظ: *{_history_expiry_minutes}* دقيقة\n\n"
+            f"_البوت يحفظ آخر {_history_max_messages} رسائل لكل شخص لمدة {_history_expiry_minutes} دقيقة حتى يفهم السياق._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data.startswith("settings_hist_n:"):
+        _history_max_messages = int(data.split(":")[1])
+        await query.answer(f"✅ تم الضبط: {_history_max_messages} رسالة")
+        tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
+        rows = [
+            [InlineKeyboardButton(tog_lbl, callback_data="settings_hist_tog")],
+            [InlineKeyboardButton("📨 عدد الرسائل المحفوظة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 1 else ''}1", callback_data="settings_hist_n:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 2 else ''}2", callback_data="settings_hist_n:2"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 3 else ''}3", callback_data="settings_hist_n:3"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 5 else ''}5", callback_data="settings_hist_n:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 10 else ''}10", callback_data="settings_hist_n:10"),
+            ],
+            [InlineKeyboardButton("⏱ مدة الحفظ (دقائق):", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 1 else ''}1د", callback_data="settings_hist_exp:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 5 else ''}5د", callback_data="settings_hist_exp:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 10 else ''}10د", callback_data="settings_hist_exp:10"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 15 else ''}15د", callback_data="settings_hist_exp:15"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 30 else ''}30د", callback_data="settings_hist_exp:30"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 60 else ''}60د", callback_data="settings_hist_exp:60"),
+            ],
+            [InlineKeyboardButton("🗑 مسح كل التواريخ الآن", callback_data="settings_hist_clear")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        status = "مفعّل ✅" if _history_enabled else "موقوف ❌"
+        await query.message.edit_text(
+            f"💬 *إعدادات حفظ الردود*\n\n"
+            f"الحالة: {status}\n"
+            f"عدد الرسائل المحفوظة: *{_history_max_messages}* رسالة\n"
+            f"مدة الحفظ: *{_history_expiry_minutes}* دقيقة\n\n"
+            f"_البوت يحفظ آخر {_history_max_messages} رسائل لكل شخص لمدة {_history_expiry_minutes} دقيقة حتى يفهم السياق._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data.startswith("settings_hist_exp:"):
+        _history_expiry_minutes = int(data.split(":")[1])
+        await query.answer(f"✅ تم الضبط: {_history_expiry_minutes} دقيقة")
+        tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
+        rows = [
+            [InlineKeyboardButton(tog_lbl, callback_data="settings_hist_tog")],
+            [InlineKeyboardButton("📨 عدد الرسائل المحفوظة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 1 else ''}1", callback_data="settings_hist_n:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 2 else ''}2", callback_data="settings_hist_n:2"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 3 else ''}3", callback_data="settings_hist_n:3"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 5 else ''}5", callback_data="settings_hist_n:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_max_messages == 10 else ''}10", callback_data="settings_hist_n:10"),
+            ],
+            [InlineKeyboardButton("⏱ مدة الحفظ (دقائق):", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 1 else ''}1د", callback_data="settings_hist_exp:1"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 5 else ''}5د", callback_data="settings_hist_exp:5"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 10 else ''}10د", callback_data="settings_hist_exp:10"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 15 else ''}15د", callback_data="settings_hist_exp:15"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 30 else ''}30د", callback_data="settings_hist_exp:30"),
+                InlineKeyboardButton(f"{'✅ ' if _history_expiry_minutes == 60 else ''}60د", callback_data="settings_hist_exp:60"),
+            ],
+            [InlineKeyboardButton("🗑 مسح كل التواريخ الآن", callback_data="settings_hist_clear")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        status = "مفعّل ✅" if _history_enabled else "موقوف ❌"
+        await query.message.edit_text(
+            f"💬 *إعدادات حفظ الردود*\n\n"
+            f"الحالة: {status}\n"
+            f"عدد الرسائل المحفوظة: *{_history_max_messages}* رسالة\n"
+            f"مدة الحفظ: *{_history_expiry_minutes}* دقيقة\n\n"
+            f"_البوت يحفظ آخر {_history_max_messages} رسائل لكل شخص لمدة {_history_expiry_minutes} دقيقة حتى يفهم السياق._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data == "settings_hist_clear":
+        _user_history.clear()
+        await query.answer("🗑 تم مسح كل تواريخ المحادثات.")
+        return
+
+    if data == "noop":
+        await query.answer()
         return
 
     # ── عرض المفاتيح ──
@@ -2445,6 +2622,56 @@ async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("ما قدرت أحمّل الصوت، جرب مرة ثانية.")
 
 
+def _get_user_history(user_id: int) -> list:
+    """يعيد تاريخ المحادثة النظيف (يحذف الرسائل المنتهية الصلاحية)."""
+    import time
+    if not _history_enabled:
+        return []
+    now = time.time()
+    expiry = _history_expiry_minutes * 60
+    entries = _user_history.get(user_id, [])
+    fresh = [e for e in entries if now - e["ts"] < expiry]
+    _user_history[user_id] = fresh
+    return fresh
+
+
+def _add_to_history(user_id: int, user_text: str, model_text: str):
+    """يضيف رسالة المستخدم ورد البوت إلى التاريخ مع تطبيق الـ sliding window."""
+    import time
+    if not _history_enabled:
+        return
+    now = time.time()
+    entries = _user_history.get(user_id, [])
+    entries.append({"role": "user",  "text": user_text,  "ts": now})
+    entries.append({"role": "model", "text": model_text, "ts": now})
+    # احتفظ فقط بآخر (max_messages * 2) إدخال (كل زوج = رسالة مستخدم + رد بوت)
+    max_entries = _history_max_messages * 2
+    _user_history[user_id] = entries[-max_entries:]
+
+
+def _build_contents_with_history(user_id: int, current_message: str) -> list:
+    """يبني قائمة المحتويات للـ Gemini مع التاريخ."""
+    import time
+    history = _get_user_history(user_id)
+    if not history:
+        return current_message
+    contents = []
+    for entry in history:
+        contents.append(
+            types.Content(
+                role=entry["role"],
+                parts=[types.Part.from_text(text=entry["text"])],
+            )
+        )
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=current_message)],
+        )
+    )
+    return contents
+
+
 async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     first_name = user.first_name or "أخي"
@@ -2510,10 +2737,12 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if now - warning_time > timedelta(minutes=WARNING_EXPIRY_MINUTES):
             del _warned_users[user_id]
 
+    contents = _build_contents_with_history(user_id, user_message)
+
     try:
         response = generate_with_rotation(
             model="gemini-2.5-flash",
-            contents=user_message,
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=GEMINI_SYSTEM_PROMPT,
                 max_output_tokens=8192,
@@ -2548,6 +2777,9 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── تسجيل الاستخدام اليومي للذكاء ──
     if chat and chat.type != "private":
         increment_ai_usage(chat.id)
+
+    # ── حفظ التاريخ ──
+    _add_to_history(user_id, user_message, reply)
 
     await update.message.reply_text(reply)
 
