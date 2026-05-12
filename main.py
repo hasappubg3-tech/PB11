@@ -432,6 +432,21 @@ BOT_TRIGGER_WORDS = [
 
 
 
+def detect_session_request(text: str) -> bool:
+    """يكتشف إذا كان الشخص يريد بدء سشن دراسة."""
+    t = text.lower().strip()
+    SESSION_TRIGGERS = [
+        "سشن", "session", "pomodoro", "بومودورو",
+        "جلسة دراسة", "سشن دراسة", "ابدأ سشن", "ابدي سشن",
+        "بدء سشن", "سوي سشن", "اعملي سشن", "اعمل سشن",
+        "ابدأي سشن", "بدي سشن",
+    ]
+    for trigger in SESSION_TRIGGERS:
+        if trigger in t:
+            return True
+    return False
+
+
 # ============================================================
 # 💬 ردود البوت لما ينادونه
 # تقدر تعدل الردود أو تضيف ردود جديدة
@@ -914,6 +929,16 @@ ARABIC_COMMANDS = {
     "إنهاء سشن": "end_session",
     "اغلاق سشن": "end_session",
     "إغلاق سشن": "end_session",
+    "ايقاف السشن": "end_session",
+    "إيقاف السشن": "end_session",
+    "الغاء السشن": "end_session",
+    "إلغاء السشن": "end_session",
+    "وقف السشن": "end_session",
+    "الغاء منع التسخيت": "stop_focus",
+    "إلغاء منع التسخيت": "stop_focus",
+    "ايقاف منع التسخيت": "stop_focus",
+    "إيقاف منع التسخيت": "stop_focus",
+    "وقف منع التسخيت": "stop_focus",
     "مساعدة": "help",
     "الاوامر": "help",
     "الأوامر": "help",
@@ -1784,7 +1809,7 @@ async def do_promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.promote_chat_member(
             chat_id,
             target.id,
-            can_manage_chat=False,
+            can_manage_chat=True,
             can_delete_messages=False,
             can_manage_video_chats=False,
             can_restrict_members=False,
@@ -2045,6 +2070,60 @@ async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def do_stop_focus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إيقاف منع التسخيت النشط للعضو في المجموعة."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يشتغل في المجموعات فقط.")
+        return
+    chat_id = chat.id
+    user_id = user.id
+    is_admin_user = await is_admin_by_id(context, chat_id, user_id)
+    if is_admin_user:
+        # المشرف يقدر يوقف منع التسخيت لأي شخص في المجموعة
+        focus_map = _focus_sessions.get(chat_id, {})
+        if not focus_map:
+            await update.message.reply_text("⚠️ لا يوجد منع تسخيت نشط في المجموعة.")
+            return
+        for uid, sess in list(focus_map.items()):
+            task = sess.get("task")
+            if task and not task.done():
+                task.cancel()
+        _focus_sessions.pop(chat_id, None)
+        await update.message.reply_text("✅ تم إيقاف منع التسخيت لجميع الأعضاء في المجموعة.")
+    else:
+        # العضو يوقف منع التسخيت الخاص فيه فقط
+        focus_map = _focus_sessions.get(chat_id, {})
+        sess = focus_map.get(user_id)
+        if not sess:
+            await update.message.reply_text("⚠️ ما عندك منع تسخيت نشط.")
+            return
+        task = sess.get("task")
+        if task and not task.done():
+            task.cancel()
+        focus_map.pop(user_id, None)
+        if not focus_map:
+            _focus_sessions.pop(chat_id, None)
+        # رفع الكتم إذا كان مكتوماً
+        if sess.get("muted"):
+            try:
+                await context.bot.restrict_chat_member(
+                    chat_id, user_id,
+                    ChatPermissions(
+                        can_send_messages=True,
+                        can_send_polls=True,
+                        can_send_other_messages=True,
+                        can_add_web_page_previews=True,
+                    ),
+                )
+            except Exception:
+                pass
+        await update.message.reply_text(f"✅ تم إيقاف منع التسخيت الخاص بك يا {user.first_name}.")
+
+
 async def do_add_auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """بدء إضافة رد تلقائي — للمشرفين فقط."""
     if not await is_admin(update, context):
@@ -2114,6 +2193,7 @@ COMMAND_HANDLERS = {
     "delete_reply": do_delete_auto_reply,
     "list_replies": do_list_auto_replies,
     "end_session": do_end_session,
+    "stop_focus": do_stop_focus,
     "help": show_help,
 }
 
