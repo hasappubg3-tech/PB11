@@ -342,6 +342,10 @@ _rate_limits: dict = {}
 # إعداد مخصص معلّق {owner_user_id: {"type": str, "target_id": int, "chat_id": int, "count": int|None}}
 _rate_limit_setup: dict = {}
 
+# كاش المستخدمين: {username_lower: user_id}  و  {user_id: User}
+_username_to_id: dict = {}
+_id_to_user: dict = {}
+
 # ============================================================
 # نظام منع التسخيت
 # ============================================================
@@ -901,19 +905,48 @@ async def get_target_user(update: Update):
 
 
 async def get_target_user_extended(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يحصل على المستخدم المستهدف عبر الرد على رسالته أو ذكر @يوزرنيم في النص."""
+    """يحصل على المستخدم المستهدف عبر الرد أو text_mention أو @يوزرنيم مخزّن بالكاش."""
     if update.message.reply_to_message:
         return update.message.reply_to_message.from_user
+
+    # 1) فحص كيانات الرسالة — text_mention يحتوي User مباشرة
+    for entity in (update.message.entities or []):
+        if entity.type == "text_mention" and entity.user:
+            return entity.user
+
+    # 2) فحص كيانات mention (@username) والبحث في الكاش
+    msg_text = update.message.text or ""
+    for entity in (update.message.entities or []):
+        if entity.type == "mention":
+            raw = msg_text[entity.offset: entity.offset + entity.length]  # مثال: @sn_sr7
+            uname = raw.lstrip("@").lower()
+            uid = _username_to_id.get(uname)
+            if uid:
+                user_obj = _id_to_user.get(uid)
+                if user_obj:
+                    return user_obj
+                try:
+                    member = await context.bot.get_chat_member(update.effective_chat.id, uid)
+                    return member.user
+                except Exception:
+                    pass
+
+    # 3) fallback: بحث regex في النص + الكاش
     import re
-    text = update.message.text or ""
-    match = re.search(r'@(\w+)', text)
+    match = re.search(r'@(\w+)', msg_text)
     if match:
-        username = match.group(1)
-        try:
-            member = await context.bot.get_chat_member(update.effective_chat.id, f"@{username}")
-            return member.user
-        except TelegramError:
-            return None
+        uname = match.group(1).lower()
+        uid = _username_to_id.get(uname)
+        if uid:
+            user_obj = _id_to_user.get(uid)
+            if user_obj:
+                return user_obj
+            try:
+                member = await context.bot.get_chat_member(update.effective_chat.id, uid)
+                return member.user
+            except Exception:
+                pass
+
     return None
 
 
@@ -3201,6 +3234,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── تسجيل أسماء المجموعات المعروفة ──
     if chat and chat.type in ("group", "supergroup") and chat.title:
         _known_chat_names[chat.id] = chat.title
+
+    # ── كاش بيانات المستخدمين (لدعم البحث بـ @يوزرنيم) ──
+    if update.effective_user:
+        _u = update.effective_user
+        _id_to_user[_u.id] = _u
+        if _u.username:
+            _username_to_id[_u.username.lower()] = _u.id
 
     # ============================================================
     # قيود المحادثات الخاصة — غير المالك وغير المشرفين
