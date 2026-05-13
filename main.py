@@ -329,6 +329,9 @@ _history_enabled: bool = True          # تفعيل/إيقاف الخاصية
 _history_max_messages: int = 3         # عدد أزواج الرسائل المحفوظة (user+model = زوج)
 _history_expiry_minutes: int = 5       # مدة صلاحية الرسائل بالدقائق
 
+# الحد الأقصى للسشنات المتزامنة
+_max_sessions: int = 2
+
 # ============================================================
 # نظام منع التسخيت
 # ============================================================
@@ -463,6 +466,22 @@ def detect_session_request(text: str) -> bool:
 # تقدر تعدل الردود أو تضيف ردود جديدة
 # ============================================================
 BOT_RESPONSES = [
+    "نعم، تفضل.",
+    "أيوه، أمر.",
+    "نعم، شبيك؟",
+    "تفضل، أسمعك.",
+    "هلا، شبيك؟",
+    "أيوه؟",
+    "نعم، شتريد؟",
+    "تفضل، أنا هنا.",
+    "هلا فيك، شبيك؟",
+    "نعم، أمرني.",
+    "أسمعك، تفضل.",
+    "هلا، أمرني.",
+    "نعم؟",
+    "شبيك؟",
+    "أمرني.",
+    "شتريد؟",
 ]
 
 _GREET_RESPONSES = [
@@ -785,13 +804,6 @@ _UNCLEAR_RESPONSES = [
 
 def get_smart_fallback(first_name: str, message: str) -> str:
     msg = message.strip().lower()
-
-    stripped = msg
-    for trigger in BOT_TRIGGER_WORDS:
-        stripped = stripped.replace(trigger.lower(), "")
-    stripped = stripped.strip("،.؟?! \t\n")
-    if len(stripped) <= 2:
-        return random.choice(BOT_RESPONSES)
 
     # تشتغل فقط لو الرسالة قصيرة (≤ 40 حرف) لتفادي الكشف الخاطئ
     if len(msg.strip()) > 40:
@@ -1153,7 +1165,7 @@ def _build_api_keys_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يعالج أزرار لوحة الإعدادات — للمالك فقط."""
-    global _history_enabled, _history_max_messages, _history_expiry_minutes
+    global _history_enabled, _history_max_messages, _history_expiry_minutes, _max_sessions
     query = update.callback_query
     if query.from_user.id != OWNER_CHAT_ID:
         await query.answer("❌ غير مصرح لك.", show_alert=True)
@@ -1169,6 +1181,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("🏘 المجموعات المسموحة", callback_data="settings_groups")],
             [InlineKeyboardButton("🤖 إعدادات الذكاء", callback_data="settings_ai")],
             [InlineKeyboardButton("💬 إعدادات حفظ الردود", callback_data="settings_history")],
+            [InlineKeyboardButton("📚 إعدادات السشنات", callback_data="settings_sessions")],
         ])
         await query.message.edit_text(
             "⚙️ *الإعدادات*\n\nاختر ما تريد تعديله:",
@@ -1567,6 +1580,58 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
     if data == "settings_hist_clear":
         _user_history.clear()
         await query.answer("🗑 تم مسح كل تواريخ المحادثات.")
+        return
+
+    # ═══════════════════════════════════════
+    # ── إعدادات السشنات ──
+    # ═══════════════════════════════════════
+    if data == "settings_sessions":
+        active = len(_sessions)
+        rows = [
+            [InlineKeyboardButton("📊 الحد الأقصى للسشنات المتزامنة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 1 else ''}1", callback_data="settings_sess_max:1"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 2 else ''}2", callback_data="settings_sess_max:2"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 3 else ''}3", callback_data="settings_sess_max:3"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 5 else ''}5", callback_data="settings_sess_max:5"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 10 else ''}10", callback_data="settings_sess_max:10"),
+            ],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        await query.message.edit_text(
+            f"📚 *إعدادات السشنات*\n\n"
+            f"الحد الأقصى للسشنات المتزامنة: *{_max_sessions}*\n"
+            f"السشنات النشطة حالياً: *{active}*\n\n"
+            f"_فقط قائد السشن أو مالك البوت يقدر يلغي السشن._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        await query.answer()
+        return
+
+    if data.startswith("settings_sess_max:"):
+        _max_sessions = int(data.split(":")[1])
+        await query.answer(f"✅ الحد الأقصى صار {_max_sessions}")
+        active = len(_sessions)
+        rows = [
+            [InlineKeyboardButton("📊 الحد الأقصى للسشنات المتزامنة:", callback_data="noop")],
+            [
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 1 else ''}1", callback_data="settings_sess_max:1"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 2 else ''}2", callback_data="settings_sess_max:2"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 3 else ''}3", callback_data="settings_sess_max:3"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 5 else ''}5", callback_data="settings_sess_max:5"),
+                InlineKeyboardButton(f"{'✅ ' if _max_sessions == 10 else ''}10", callback_data="settings_sess_max:10"),
+            ],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")],
+        ]
+        await query.message.edit_text(
+            f"📚 *إعدادات السشنات*\n\n"
+            f"الحد الأقصى للسشنات المتزامنة: *{_max_sessions}*\n"
+            f"السشنات النشطة حالياً: *{active}*\n\n"
+            f"_فقط قائد السشن أو مالك البوت يقدر يلغي السشن._",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
         return
 
     if data == "noop":
@@ -2036,9 +2101,15 @@ async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if chat_id in _sessions:
         text, keyboard = build_session_message(chat_id)
         await update.message.reply_text(
-            "⚠️ يوجد سشن نشط حالياً!\n\n" + text,
+            "⚠️ يوجد سشن نشط في هذه المجموعة!\n\n" + text,
             reply_markup=keyboard,
             parse_mode="Markdown",
+        )
+        return
+    if len(_sessions) >= _max_sessions:
+        await update.message.reply_text(
+            f"⚠️ وصلنا للحد الأقصى من السشنات النشطة ({_max_sessions}).\n"
+            f"انتظر انتهاء أحدها أو غيّر الحد من الإعدادات."
         )
         return
     keyboard = InlineKeyboardMarkup([
@@ -2135,15 +2206,26 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إنهاء السشن النشط — للمشرفين فقط."""
-    if not await is_admin(update, context):
-        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
-        return
+    """إنهاء السشن — قائد السشن أو المالك فقط."""
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id if update.effective_user else None
+
     if chat_id not in _sessions:
         await update.message.reply_text("⚠️ لا يوجد سشن نشط حالياً.")
         return
-    session = _sessions.pop(chat_id)
+
+    session = _sessions[chat_id]
+    creator_id = session.get("creator_id")
+
+    # السماح فقط لقائد السشن أو مالك البوت
+    if user_id != creator_id and user_id != OWNER_CHAT_ID:
+        creator_name = session.get("creator_name", "قائد السشن")
+        await update.message.reply_text(
+            f"❌ فقط {creator_name} (قائد السشن) أو مالك البوت يقدر يلغي هذا السشن."
+        )
+        return
+
+    _sessions.pop(chat_id)
     task = session.get("task")
     if task and not task.done():
         task.cancel()
@@ -2646,6 +2728,16 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         warning_time = _warned_users[user_id]
         if now - warning_time > timedelta(minutes=WARNING_EXPIRY_MINUTES):
             del _warned_users[user_id]
+
+    # ── لو الرسالة مجرد اسم البوت أو رمز قصير — رد نداء مباشر ──
+    _stripped_call = user_message.strip().lower()
+    for _tr in BOT_TRIGGER_WORDS:
+        _stripped_call = _stripped_call.replace(_tr.lower(), "")
+    _stripped_call = _stripped_call.strip("،.؟?!_ \t\n")
+    if len(_stripped_call) <= 2:
+        reply = random.choice(BOT_RESPONSES)
+        await update.message.reply_text(reply)
+        return
 
     # ── الردود المحفوظة تأتي أولاً (أسرع ولا تستهلك API) ──
     reply = get_smart_fallback(first_name, user_message)
