@@ -330,7 +330,7 @@ _history_max_messages: int = 3         # عدد أزواج الرسائل الم
 _history_expiry_minutes: int = 5       # مدة صلاحية الرسائل بالدقائق
 
 # الحد الأقصى للسشنات المتزامنة
-_max_sessions: int = 2
+_max_sessions: int = 1
 
 # ============================================================
 # 📊 نظام حد الرسائل
@@ -863,6 +863,10 @@ ARABIC_COMMANDS = {
     "كشف": "info",
     "حد الرسائل": "rate_limit",
     "حد رسائل": "rate_limit",
+    "الغاء حد الرسائل": "cancel_rate_limit",
+    "إلغاء حد الرسائل": "cancel_rate_limit",
+    "رفع حد الرسائل": "cancel_rate_limit",
+    "وقف حد الرسائل": "cancel_rate_limit",
     "رفع مشرف": "promote",
     "تنزيل عضو": "demote",
     "اضافة رد": "add_reply",
@@ -966,7 +970,8 @@ def arabic_error(e: Exception) -> str:
 def is_calling_bot(text: str) -> bool:
     text_stripped = text.strip().lower()
     for trigger in BOT_TRIGGER_WORDS:
-        if text_stripped == trigger.lower() or text_stripped.startswith(trigger.lower() + " ") or text_stripped.startswith(trigger.lower() + "\n") or text_stripped.endswith(" " + trigger.lower()) or (" " + trigger.lower() + " ") in text_stripped:
+        t = trigger.lower()
+        if text_stripped == t or text_stripped.startswith(t + " ") or text_stripped.startswith(t + "\n"):
             return True
     return False
 
@@ -1733,9 +1738,9 @@ async def do_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد حظره.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
@@ -1753,9 +1758,9 @@ async def do_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد رفع الحظر عنه.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
     try:
@@ -1770,9 +1775,9 @@ async def do_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد كتمه.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
@@ -1790,9 +1795,9 @@ async def do_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد رفع الكتم عنه.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
     try:
@@ -1816,9 +1821,9 @@ async def do_kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد طرده.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
@@ -1837,9 +1842,9 @@ async def do_warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("❌ أنت مو مشرف، هذا الأمر ما يخصك.")
         return
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
-        await update.message.reply_text("❗ يرجى الرد على رسالة العضو المراد تحذيره.")
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id_check = update.effective_chat.id
     if await is_admin_by_id(context, chat_id_check, target.id):
@@ -2126,17 +2131,12 @@ async def _restore_rate_limit_task(bot, chat_id: int, user_id: int, window_secon
             )
         except Exception:
             pass
+    # أعد تهيئة العداد للنافذة الجديدة — حد الرسائل يبقى نشطاً حتى يُلغى يدوياً
     if rl_key in _rate_limits:
-        del _rate_limits[rl_key]
-    try:
-        user_mention = f"[{_rate_limits.get(rl_key, {}).get('target_name', 'المستخدم')}](tg://user?id={user_id})"
-        await bot.send_message(
-            chat_id,
-            f"✅ انتهت مدة حد الرسائل — تم رفع التقييد عن {user_mention}.",
-            parse_mode="Markdown",
-        )
-    except Exception:
-        pass
+        rl = _rate_limits[rl_key]
+        rl["count"] = 0
+        rl["restricted"] = False
+        rl["reset_time"] = datetime.now() + timedelta(seconds=window_seconds)
 
 
 async def _apply_rate_limit_restriction(bot, chat_id: int, user_id: int, user_name: str, window_seconds: int):
@@ -2205,6 +2205,39 @@ async def do_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 *حد الرسائل لـ {target.full_name}*\n\n"
         f"اختر عدد الرسائل المسموح بها قبل التقييد:",
         reply_markup=kb,
+        parse_mode="Markdown",
+    )
+
+
+async def do_cancel_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_CHAT_ID:
+        await update.message.reply_text("❌ هذا الأمر خاص بالمالك فقط.")
+        return
+    target = await get_target_user_extended(update, context)
+    if not target:
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
+        return
+    chat_id = update.effective_chat.id
+    rl_key = f"{chat_id}_{target.id}"
+    if rl_key not in _rate_limits:
+        await update.message.reply_text(f"⚠️ لا يوجد حد رسائل مفعّل لـ *{target.full_name}*.", parse_mode="Markdown")
+        return
+    del _rate_limits[rl_key]
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id, target.id,
+            ChatPermissions(
+                can_send_messages=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+            ),
+        )
+    except Exception:
+        pass
+    user_mention = f"[{target.full_name}](tg://user?id={target.id})"
+    await update.message.reply_text(
+        f"✅ تم إلغاء حد الرسائل عن {user_mention}.",
         parse_mode="Markdown",
     )
 
@@ -2369,8 +2402,8 @@ async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     if len(_sessions) >= _max_sessions:
         await update.message.reply_text(
-            f"⚠️ وصلنا للحد الأقصى من السشنات النشطة ({_max_sessions}).\n"
-            f"انتظر انتهاء أحدها أو غيّر الحد من الإعدادات."
+            f"عذراً، يوجد أكثر من {_max_sessions} سشن حالياً 🚫\n"
+            f"انتظر انتهاء أحد السشنات ثم حاول مجدداً."
         )
         return
     keyboard = InlineKeyboardMarkup([
@@ -2626,6 +2659,7 @@ COMMAND_HANDLERS = {
     "stop_focus": do_stop_focus,
     "help": show_help,
     "rate_limit": do_rate_limit,
+    "cancel_rate_limit": do_cancel_rate_limit,
 }
 
 
@@ -3402,7 +3436,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         pass
                     return
             else:
-                _rate_limits.pop(rl_key, None)
+                # انتهت النافذة — أعد العداد بدلاً من حذف الحد
+                rl["count"] = 0
+                rl["restricted"] = False
+                rl["reset_time"] = datetime.now() + timedelta(seconds=rl["window_seconds"])
 
     action = None
     for cmd, act in ARABIC_COMMANDS.items():
