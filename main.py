@@ -333,6 +333,16 @@ _history_expiry_minutes: int = 5       # مدة صلاحية الرسائل با
 _max_sessions: int = 2
 
 # ============================================================
+# 📊 نظام حد الرسائل
+# ============================================================
+# {f"{chat_id}_{user_id}": {"limit": int, "window_seconds": int, "count": int,
+#                            "reset_time": datetime, "restricted": bool,
+#                            "was_admin": bool, "target_name": str}}
+_rate_limits: dict = {}
+# إعداد مخصص معلّق {owner_user_id: {"type": str, "target_id": int, "chat_id": int, "count": int|None}}
+_rate_limit_setup: dict = {}
+
+# ============================================================
 # نظام منع التسخيت
 # ============================================================
 
@@ -850,6 +860,9 @@ ARABIC_COMMANDS = {
     "حذف رد": "delete_reply",
     "حذف": "delete",
     "معلومات": "info",
+    "كشف": "info",
+    "حد الرسائل": "rate_limit",
+    "حد رسائل": "rate_limit",
     "رفع مشرف": "promote",
     "تنزيل عضو": "demote",
     "اضافة رد": "add_reply",
@@ -1906,7 +1919,7 @@ async def do_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def do_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target = await get_target_user(update)
+    target = await get_target_user_extended(update, context)
     if not target:
         target = update.effective_user
     chat_id = update.effective_chat.id
@@ -2010,6 +2023,257 @@ async def do_demote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🔽 تم تنزيل *{name}* إلى عضو.", parse_mode="Markdown")
     except TelegramError as e:
         await update.message.reply_text(f"❌ فشل تنزيل المشرف: {arabic_error(e)}")
+
+
+# ============================================================
+# 📊 نظام حد الرسائل
+# ============================================================
+
+def _format_duration(seconds: int) -> str:
+    if seconds < 3600:
+        m = seconds // 60
+        return f"{m} دقيقة"
+    elif seconds < 86400:
+        h = seconds // 3600
+        rem = (seconds % 3600) // 60
+        if rem == 0:
+            return f"{h} ساعة" if h == 1 else f"{h} ساعات"
+        return f"{h} ساعة و{rem} دقيقة"
+    else:
+        d = seconds // 86400
+        return f"{d} يوم" if d == 1 else f"{d} أيام"
+
+
+def _build_rl_count_keyboard(target_id: int, chat_id: int) -> InlineKeyboardMarkup:
+    counts = [5, 10, 20, 30, 50, 100]
+    buttons = []
+    row = []
+    for c in counts:
+        row.append(InlineKeyboardButton(str(c), callback_data=f"rl_c_{target_id}_{chat_id}_{c}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("✏️ مخصص", callback_data=f"rl_c_{target_id}_{chat_id}_x")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _build_rl_time_keyboard(target_id: int, chat_id: int, count: int) -> InlineKeyboardMarkup:
+    times = [
+        ("30 دقيقة", 1800), ("1 ساعة", 3600), ("2 ساعة", 7200),
+        ("3 ساعات", 10800), ("6 ساعات", 21600), ("12 ساعة", 43200), ("24 ساعة", 86400),
+    ]
+    buttons = []
+    row = []
+    for label, secs in times:
+        row.append(InlineKeyboardButton(label, callback_data=f"rl_t_{target_id}_{chat_id}_{count}_{secs}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("✏️ مخصص (بالدقائق)", callback_data=f"rl_t_{target_id}_{chat_id}_{count}_x")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _activate_rate_limit_data(chat_id: int, target_id: int, target_name: str, count: int, window_seconds: int) -> str:
+    rl_key = f"{chat_id}_{target_id}"
+    _rate_limits[rl_key] = {
+        "limit": count,
+        "window_seconds": window_seconds,
+        "count": 0,
+        "reset_time": datetime.now() + timedelta(seconds=window_seconds),
+        "restricted": False,
+        "was_admin": False,
+        "target_name": target_name,
+    }
+    time_str = _format_duration(window_seconds)
+    return (
+        f"✅ تم تفعيل حد الرسائل لـ *{target_name}*\n"
+        f"✉️ الحد: {count} رسالة\n"
+        f"⏱ المدة: {time_str}\n\n"
+        f"_سيُقيَّد تلقائياً عند تجاوز الحد._"
+    )
+
+
+async def _restore_rate_limit_task(bot, chat_id: int, user_id: int, window_seconds: int, was_admin: bool):
+    await asyncio.sleep(window_seconds)
+    rl_key = f"{chat_id}_{user_id}"
+    try:
+        await bot.restrict_chat_member(
+            chat_id, user_id,
+            ChatPermissions(
+                can_send_messages=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+            ),
+        )
+    except Exception:
+        pass
+    if was_admin:
+        try:
+            await bot.promote_chat_member(
+                chat_id, user_id,
+                can_manage_chat=True,
+                can_delete_messages=True,
+                can_restrict_members=True,
+                can_promote_members=False,
+                can_change_info=False,
+                can_invite_users=True,
+                can_pin_messages=True,
+            )
+        except Exception:
+            pass
+    if rl_key in _rate_limits:
+        del _rate_limits[rl_key]
+    try:
+        user_mention = f"[{_rate_limits.get(rl_key, {}).get('target_name', 'المستخدم')}](tg://user?id={user_id})"
+        await bot.send_message(
+            chat_id,
+            f"✅ انتهت مدة حد الرسائل — تم رفع التقييد عن {user_mention}.",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+
+async def _apply_rate_limit_restriction(bot, chat_id: int, user_id: int, user_name: str, window_seconds: int):
+    rl_key = f"{chat_id}_{user_id}"
+    rl = _rate_limits.get(rl_key)
+    if not rl or rl.get("restricted"):
+        return
+    rl["restricted"] = True
+    was_admin = False
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        if member.status in ("administrator", "creator"):
+            was_admin = True
+            if member.status != "creator":
+                await bot.promote_chat_member(
+                    chat_id, user_id,
+                    can_manage_chat=False,
+                    can_delete_messages=False,
+                    can_manage_video_chats=False,
+                    can_restrict_members=False,
+                    can_promote_members=False,
+                    can_change_info=False,
+                    can_invite_users=False,
+                    can_pin_messages=False,
+                )
+    except Exception:
+        pass
+    rl["was_admin"] = was_admin
+    try:
+        await bot.restrict_chat_member(
+            chat_id, user_id,
+            ChatPermissions(
+                can_send_messages=False,
+                can_send_polls=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False,
+            ),
+        )
+    except Exception:
+        pass
+    time_str = _format_duration(window_seconds)
+    user_mention = f"[{user_name}](tg://user?id={user_id})"
+    try:
+        await bot.send_message(
+            chat_id,
+            f"🔇 *{user_mention}* تجاوز حد الرسائل ({rl['limit']} رسالة).\n"
+            f"⏳ سيُمنع من الإرسال لمدة {time_str}.",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+    asyncio.create_task(_restore_rate_limit_task(bot, chat_id, user_id, window_seconds, was_admin))
+
+
+async def do_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_CHAT_ID:
+        await update.message.reply_text("❌ هذا الأمر خاص بالمالك فقط.")
+        return
+    target = await get_target_user_extended(update, context)
+    if not target:
+        await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
+        return
+    chat_id = update.effective_chat.id
+    kb = _build_rl_count_keyboard(target.id, chat_id)
+    await update.message.reply_text(
+        f"📊 *حد الرسائل لـ {target.full_name}*\n\n"
+        f"اختر عدد الرسائل المسموح بها قبل التقييد:",
+        reply_markup=kb,
+        parse_mode="Markdown",
+    )
+
+
+async def handle_rate_limit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    owner_id = update.effective_user.id
+
+    if owner_id != OWNER_CHAT_ID:
+        return
+
+    if data.startswith("rl_c_"):
+        rest = data[5:]
+        parts = rest.split("_")
+        target_id = int(parts[0])
+        chat_id = int(parts[1])
+        val_str = parts[2]
+        if val_str == "x":
+            _pending_settings_input[owner_id] = {
+                "type": "rl_custom_count",
+                "target_id": target_id,
+                "chat_id": chat_id,
+            }
+            await query.edit_message_text("✏️ أرسل عدد الرسائل المسموح بها (رقم من 1 إلى 9999):")
+        else:
+            count = int(val_str)
+            try:
+                member = await context.bot.get_chat_member(chat_id, target_id)
+                target_name = member.user.full_name
+            except Exception:
+                target_name = str(target_id)
+            kb = _build_rl_time_keyboard(target_id, chat_id, count)
+            await query.edit_message_text(
+                f"📊 *حد الرسائل لـ {target_name}*\n"
+                f"✉️ الحد: {count} رسالة\n\n"
+                f"⏱ اختر المدة الزمنية:",
+                reply_markup=kb,
+                parse_mode="Markdown",
+            )
+
+    elif data.startswith("rl_t_"):
+        rest = data[5:]
+        parts = rest.split("_")
+        target_id = int(parts[0])
+        chat_id = int(parts[1])
+        count = int(parts[2])
+        val_str = parts[3]
+        if val_str == "x":
+            _pending_settings_input[owner_id] = {
+                "type": "rl_custom_time",
+                "target_id": target_id,
+                "chat_id": chat_id,
+                "count": count,
+            }
+            await query.edit_message_text(
+                f"✉️ الحد: {count} رسالة\n\n"
+                f"✏️ أرسل المدة بالدقائق (مثال: 90 = ساعة ونصف، 1440 = يوم):"
+            )
+        else:
+            secs = int(val_str)
+            try:
+                member = await context.bot.get_chat_member(chat_id, target_id)
+                target_name = member.user.full_name
+            except Exception:
+                target_name = str(target_id)
+            msg = _activate_rate_limit_data(chat_id, target_id, target_name, count, secs)
+            await query.edit_message_text(msg, parse_mode="Markdown")
 
 
 # ============================================================
@@ -2361,6 +2625,7 @@ COMMAND_HANDLERS = {
     "end_session": do_end_session,
     "stop_focus": do_stop_focus,
     "help": show_help,
+    "rate_limit": do_rate_limit,
 }
 
 
@@ -2980,6 +3245,44 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _pending_settings_input[user_id] = state
             return
 
+        elif state["type"] == "rl_custom_count":
+            target_id = state["target_id"]
+            chat_id_rl = state["chat_id"]
+            if not val.isdigit() or not (1 <= int(val) <= 9999):
+                await update.message.reply_text("❗ أدخل رقماً بين 1 و 9999.")
+                _pending_settings_input[user_id] = state
+                return
+            count = int(val)
+            try:
+                member = await context.bot.get_chat_member(chat_id_rl, target_id)
+                target_name = member.user.full_name
+            except Exception:
+                target_name = str(target_id)
+            kb = _build_rl_time_keyboard(target_id, chat_id_rl, count)
+            await update.message.reply_text(
+                f"✅ الحد: {count} رسالة\n\n⏱ اختر المدة الزمنية:",
+                reply_markup=kb,
+            )
+            return
+
+        elif state["type"] == "rl_custom_time":
+            target_id = state["target_id"]
+            chat_id_rl = state["chat_id"]
+            count = state["count"]
+            if not val.isdigit() or not (1 <= int(val) <= 99999):
+                await update.message.reply_text("❗ أدخل رقماً بالدقائق (مثال: 90 = ساعة ونصف).")
+                _pending_settings_input[user_id] = state
+                return
+            window_secs = int(val) * 60
+            try:
+                member = await context.bot.get_chat_member(chat_id_rl, target_id)
+                target_name = member.user.full_name
+            except Exception:
+                target_name = str(target_id)
+            msg = _activate_rate_limit_data(chat_id_rl, target_id, target_name, count, window_secs)
+            await update.message.reply_text(msg, parse_mode="Markdown")
+            return
+
     # ============================================================
     # معالجة إدخال مفاتيح API الجديدة من المالك
     # ============================================================
@@ -3077,6 +3380,29 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ تم إضافة الرد التلقائي:\n\nالكلمة: «{keyword}»\nالرد: {reply_val}"
             )
             return
+
+    # ============================================================
+    # 📊 فحص حد الرسائل — يعدّ رسائل الأعضاء ويقيّد عند التجاوز
+    # ============================================================
+    if chat and chat.type in ("group", "supergroup") and user_id:
+        rl_key = f"{chat.id}_{user_id}"
+        if rl_key in _rate_limits:
+            rl = _rate_limits[rl_key]
+            now = datetime.now()
+            if now < rl["reset_time"]:
+                rl["count"] += 1
+                if rl["count"] > rl["limit"] and not rl.get("restricted"):
+                    uname = update.effective_user.full_name if update.effective_user else str(user_id)
+                    asyncio.create_task(
+                        _apply_rate_limit_restriction(context.bot, chat.id, user_id, uname, rl["window_seconds"])
+                    )
+                    try:
+                        await update.message.delete()
+                    except Exception:
+                        pass
+                    return
+            else:
+                _rate_limits.pop(rl_key, None)
 
     action = None
     for cmd, act in ARABIC_COMMANDS.items():
@@ -3476,6 +3802,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_session_callback, pattern=r"^sess_"))
     app.add_handler(CallbackQueryHandler(handle_settings_callback, pattern=r"^settings_"))
     app.add_handler(CallbackQueryHandler(handle_focus_callback, pattern=r"^focus_"))
+    app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_error_handler(error_handler)
