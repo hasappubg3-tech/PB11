@@ -284,15 +284,25 @@ _pending_next_session: dict = {}
 # {user_id: {"step": "study"|"break", "chat_id": int, "study": int|None}}
 _pending_session_config: dict = {}
 
-# أسماء ترتيبية للسشنات
+# أسماء ترتيبية للسشنات — مذكّر (السشن) ومؤنّث (الجلسة)
 _SESSION_ORDINALS_AR = {
     1: "الأول", 2: "الثاني", 3: "الثالث", 4: "الرابع", 5: "الخامس",
     6: "السادس", 7: "السابع", 8: "الثامن", 9: "التاسع", 10: "العاشر",
 }
+_SESSION_ORDINALS_AR_F = {
+    1: "الأولى", 2: "الثانية", 3: "الثالثة", 4: "الرابعة", 5: "الخامسة",
+    6: "السادسة", 7: "السابعة", 8: "الثامنة", 9: "التاسعة", 10: "العاشرة",
+}
 
 
 def _session_ordinal(n: int) -> str:
+    """ترتيبي مذكّر — للسشن."""
     return _SESSION_ORDINALS_AR.get(n, str(n))
+
+
+def _session_ordinal_f(n: int) -> str:
+    """ترتيبي مؤنّث — للجلسة."""
+    return _SESSION_ORDINALS_AR_F.get(n, str(n))
 
 # مجموعة معرّفات المالك الذين ينتظرون إدخال مفاتيح API جديدة
 _pending_api_key_input: set = set()
@@ -475,8 +485,10 @@ BOT_TRIGGER_WORDS = [
 
 
 def detect_session_request(text: str) -> bool:
-    """يكتشف إذا كان الشخص يريد بدء سشن دراسة."""
-    t = text.lower().strip()
+    """يكتشف إذا كان الشخص يريد بدء سشن دراسة.
+    الأمر لازم يكون في بداية الرسالة أو يكون الرسالة كلها — وليس وسط جملة."""
+    t = text.strip()
+    tl = t.lower()
     SESSION_TRIGGERS = [
         "سشن", "session", "pomodoro", "بومودورو",
         "جلسة دراسة", "سشن دراسة", "ابدأ سشن", "ابدي سشن",
@@ -484,7 +496,12 @@ def detect_session_request(text: str) -> bool:
         "ابدأي سشن", "بدي سشن",
     ]
     for trigger in SESSION_TRIGGERS:
-        if trigger in t:
+        tr = trigger.lower()
+        # الرسالة كلها = الأمر
+        if tl == tr:
+            return True
+        # الأمر في بداية الرسالة متبوعاً بمسافة أو سطر جديد
+        if tl.startswith(tr + " ") or tl.startswith(tr + "\n"):
             return True
     return False
 
@@ -2381,8 +2398,9 @@ def build_session_message(chat_id: int, sess_id: int) -> tuple:
         names = " | ".join(p["name"] for p in participants)
     else:
         names = "لا أحد بعد"
+    ordinal_f = _session_ordinal_f(session_num)
     text = (
-        f"🎯 *جلسة الدراسة {ordinal}!*\n\n"
+        f"🎯 *جلسة الدراسة {ordinal_f}!*\n\n"
         f"👤 المنظم: {session['creator_name']}\n"
         f"📚 الدراسة: {session['study']} دقيقة\n"
         f"☕ الاستراحة: {session['break']} دقيقة\n"
@@ -2404,6 +2422,16 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         break_min = session["break"]
         session_num = session.get("session_num", 1)
 
+        # ── رسالة تأكيد بدء العدّ ──
+        mentions_start = build_mentions(_sessions[chat_id][sess_id]["participants"])
+        await bot.send_message(
+            chat_id,
+            f"🚀 *بدأت جلسة الدراسة {_session_ordinal_f(session_num)}!*\n\n"
+            f"⏱ الدراسة: *{study_min}* دقيقة | ☕ الاستراحة: *{break_min}* دقيقة\n\n"
+            f"{mentions_start}",
+            parse_mode="Markdown",
+        )
+
         # ── انتظار وقت الدراسة ──
         await asyncio.sleep(study_min * 60)
         if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
@@ -2412,8 +2440,8 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         mentions = build_mentions(session["participants"])
         await bot.send_message(
             chat_id,
-            f"🎉🎊🥳 *أحسنتم! انتهى وقت الدراسة {_session_ordinal(session_num)}!*\n\n"
-            f"استحقيتوا راحة {break_min} دقيقة ☕🎉\n\n"
+            f"🎉🎊🥳 *أحسنتم! انتهت جلسة الدراسة {_session_ordinal_f(session_num)}!*\n\n"
+            f"استحقيتوا راحة {break_min} دقيقة ☕\n\n"
             f"{mentions}",
             parse_mode="Markdown",
         )
