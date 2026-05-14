@@ -2402,31 +2402,44 @@ def build_mentions_html(participants: list) -> str:
 
 
 def build_session_message(chat_id: int, sess_id: int) -> tuple:
-    """يبني نص رسالة السشن مع أزرار الانضمام والبدء."""
+    """يبني رسالة السشن بصيغة HTML حسب المرحلة (waiting / studying)."""
     session = _sessions[chat_id][sess_id]
     participants = session["participants"]
     session_num = session.get("session_num", 1)
-    if participants:
-        names = " | ".join(p["name"] for p in participants)
-    else:
-        names = "لا أحد بعد"
+    phase = session.get("phase", "waiting")
+    names = " | ".join(_html_module.escape(p["name"]) for p in participants) if participants else "لا أحد بعد"
     ordinal_f = _session_ordinal_f(session_num)
-    text = (
-        f"🎯 *جلسة الدراسة {ordinal_f}!*\n\n"
-        f"👤 المنظم: {session['creator_name']}\n"
-        f"📚 الدراسة: {session['study']} دقيقة\n"
-        f"☕ الاستراحة: {session['break']} دقيقة\n"
-        f"👥 المشاركون ({len(participants)}): {names}"
-    )
-    task = session.get("task")
-    already_started = task is not None and not task.done()
-    rows = [
-        [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
-    ]
-    if not already_started:
-        rows.append([InlineKeyboardButton("🚀 بدء السشن", callback_data=f"sess_start:{chat_id}:{sess_id}")])
-    keyboard = InlineKeyboardMarkup(rows)
-    return text, keyboard
+    creator = _html_module.escape(session["creator_name"])
+    study = session["study"]
+    break_t = session["break"]
+    count = len(participants)
+    mentions = build_mentions_html(participants)
+
+    if phase == "waiting":
+        text = (
+            f"🎯 <b>جلسة الدراسة {ordinal_f}!</b>\n\n"
+            f"👤 المنظم: {creator}\n"
+            f"📚 الدراسة: <b>{study}</b> دقيقة\n"
+            f"☕ الاستراحة: <b>{break_t}</b> دقيقة\n"
+            f"👥 المشاركون ({count}): {names}"
+        )
+        rows = [
+            [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
+            [InlineKeyboardButton("🚀 بدء السشن", callback_data=f"sess_start:{chat_id}:{sess_id}")],
+        ]
+    else:
+        text = (
+            f"📚 <b>جلسة الدراسة {ordinal_f} — نشطة!</b>\n\n"
+            f"👤 المنظم: {creator}\n"
+            f"⏱ الدراسة: <b>{study}</b> دقيقة | ☕ الاستراحة: <b>{break_t}</b> دقيقة\n"
+            f"👥 المشاركون ({count}): {names}\n\n"
+            f"🔴 <i>جارٍ الدراسة...</i>\n\n"
+            f"{mentions}"
+        )
+        rows = [
+            [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
+        ]
+    return text, InlineKeyboardMarkup(rows)
 
 
 async def run_session_timer(chat_id: int, sess_id: int, bot):
@@ -2445,13 +2458,30 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
             return
         session = _sessions[chat_id][sess_id]
         mentions = build_mentions_html(session["participants"])
-        await bot.send_message(
+        names = " | ".join(_html_module.escape(p["name"]) for p in session["participants"])
+        creator = _html_module.escape(session["creator_name"])
+
+        # حذف البطاقة النشطة وإرسال رسالة انتهاء الدراسة
+        old_msg = session.get("message_id")
+        if old_msg:
+            try:
+                await bot.delete_message(chat_id, old_msg)
+            except Exception:
+                pass
+        join_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}"),
+        ]])
+        study_end_msg = await bot.send_message(
             chat_id,
             f"🎉🎊🥳 <b>أحسنتم! انتهت جلسة الدراسة {_session_ordinal_f(session_num)}!</b>\n\n"
-            f"استحقيتوا راحة {break_min} دقيقة ☕\n\n"
+            f"👤 المنظم: {creator}\n"
+            f"👥 المشاركون ({len(session['participants'])}): {names}\n\n"
+            f"استحقيتوا راحة <b>{break_min}</b> دقيقة ☕\n\n"
             f"{mentions}",
+            reply_markup=join_kb,
             parse_mode="HTML",
         )
+        session["message_id"] = study_end_msg.message_id
 
         # ── انتظار وقت الاستراحة ──
         await asyncio.sleep(break_min * 60)
@@ -2459,6 +2489,7 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
             return
         session = _sessions[chat_id][sess_id]
         mentions = build_mentions_html(session["participants"])
+        names = " | ".join(_html_module.escape(p["name"]) for p in session["participants"])
         next_num = session_num + 1
         next_ord = _session_ordinal(next_num)
 
@@ -2472,12 +2503,20 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
             "next_num": next_num,
         }
 
+        # حذف رسالة انتهاء الدراسة وإرسال رسالة انتهاء الاستراحة
+        old_msg2 = session.get("message_id")
+        if old_msg2:
+            try:
+                await bot.delete_message(chat_id, old_msg2)
+            except Exception:
+                pass
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton(f"🚀 بدء السشن {next_ord}", callback_data=f"sess_next:{chat_id}:{sess_id}"),
         ]])
         await bot.send_message(
             chat_id,
             f"☕ <b>انتهت الاستراحة!</b>\n\n"
+            f"👥 {names}\n\n"
             f"{mentions}\n\n"
             f"هل أنتم مستعدون للسشن {next_ord}؟ 💪",
             reply_markup=keyboard,
@@ -2549,6 +2588,7 @@ def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
         "task": None,
         "sess_id": sess_id,
         "session_num": session_num,
+        "phase": "waiting",
     }
     return sess_id
 
@@ -2575,87 +2615,19 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             pass
         text, keyboard = build_session_message(chat_id, sess_id)
-        msg = await context.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+        msg = await context.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
         _sessions[chat_id][sess_id]["message_id"] = msg.message_id
         await query.answer("✅ اشترك وابدأ السشن!")
         return
 
-    # ── تخصيص المدة — الخطوة 1: اختر وقت الدراسة ──
+    # ── تخصيص المدة — إدخال نصي ──
     if data == "sess_custom":
+        _pending_session_config[user.id] = {"step": "study", "chat_id": chat_id}
         await query.answer()
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("1 د", callback_data="sess_cs:1"),
-                InlineKeyboardButton("5 د", callback_data="sess_cs:5"),
-                InlineKeyboardButton("10 د", callback_data="sess_cs:10"),
-                InlineKeyboardButton("15 د", callback_data="sess_cs:15"),
-            ],
-            [
-                InlineKeyboardButton("20 د", callback_data="sess_cs:20"),
-                InlineKeyboardButton("25 د", callback_data="sess_cs:25"),
-                InlineKeyboardButton("30 د", callback_data="sess_cs:30"),
-                InlineKeyboardButton("45 د", callback_data="sess_cs:45"),
-            ],
-            [
-                InlineKeyboardButton("60 د", callback_data="sess_cs:60"),
-                InlineKeyboardButton("90 د", callback_data="sess_cs:90"),
-                InlineKeyboardButton("120 د", callback_data="sess_cs:120"),
-            ],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="sess_back")],
-        ])
         await query.message.edit_text(
-            "⚙️ *تخصيص السشن*\n\n*الخطوة 1/2 — اختر مدة الدراسة:*",
-            reply_markup=kb,
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── تخصيص المدة — الخطوة 2: اختر وقت الاستراحة ──
-    if data.startswith("sess_cs:"):
-        study_picked = int(data.split(":")[1])
-        await query.answer()
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("1 د", callback_data=f"sess_p:{study_picked}:1"),
-                InlineKeyboardButton("5 د", callback_data=f"sess_p:{study_picked}:5"),
-                InlineKeyboardButton("10 د", callback_data=f"sess_p:{study_picked}:10"),
-            ],
-            [
-                InlineKeyboardButton("15 د", callback_data=f"sess_p:{study_picked}:15"),
-                InlineKeyboardButton("20 د", callback_data=f"sess_p:{study_picked}:20"),
-                InlineKeyboardButton("30 د", callback_data=f"sess_p:{study_picked}:30"),
-            ],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="sess_custom")],
-        ])
-        await query.message.edit_text(
-            f"⚙️ *تخصيص السشن*\n\n"
-            f"✅ الدراسة: *{study_picked}* دقيقة\n\n"
-            f"*الخطوة 2/2 — اختر مدة الاستراحة:*",
-            reply_markup=kb,
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── رجوع للقائمة الرئيسية ──
-    if data == "sess_back":
-        await query.answer()
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("⏱ 25 / 5 دقيقة", callback_data="sess_p:25:5"),
-                InlineKeyboardButton("⏱ 45 / 15 دقيقة", callback_data="sess_p:45:15"),
-            ],
-            [
-                InlineKeyboardButton("⏱ 50 / 10 دقيقة", callback_data="sess_p:50:10"),
-                InlineKeyboardButton("⏱ 90 / 20 دقيقة", callback_data="sess_p:90:20"),
-            ],
-            [InlineKeyboardButton("⚙️ تخصيص", callback_data="sess_custom")],
-        ])
-        await query.message.edit_text(
-            "🎯 *إنشاء جلسة دراسة*\n\n"
-            "اختر مدة الدراسة والاستراحة:\n"
-            "_(دراسة / استراحة — بالدقائق)_",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
+            "⚙️ <b>تخصيص السشن</b>\n\n"
+            "📝 أرسل مدة الدراسة بالدقائق (مثال: 25)",
+            parse_mode="HTML",
         )
         return
 
@@ -2677,7 +2649,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             pass
         text, keyboard = build_session_message(tgt_chat, tgt_sess)
-        msg = await context.bot.send_message(tgt_chat, text, reply_markup=keyboard, parse_mode="Markdown")
+        msg = await context.bot.send_message(tgt_chat, text, reply_markup=keyboard, parse_mode="HTML")
         session["message_id"] = msg.message_id
         await query.answer("✅ انضممت للسشن!")
         return
@@ -2701,29 +2673,38 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         break_min = session["break"]
         session_num = session.get("session_num", 1)
         ordinal_f = _session_ordinal_f(session_num)
-        mentions = build_mentions(session["participants"])
-        # إزالة زر "بدء" من البطاقة — يبقى فقط زر "انضم"
-        try:
-            await query.message.edit_reply_markup(
-                InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{tgt_chat}:{tgt_sess}"),
-                ]])
-            )
-        except Exception:
-            pass
-        # العدّ التنازلي
+        # العدّ التنازلي — رسالة منفصلة
         cd = await context.bot.send_message(tgt_chat, "3️⃣")
         await asyncio.sleep(1)
         await cd.edit_text("2️⃣")
         await asyncio.sleep(1)
         await cd.edit_text("1️⃣")
         await asyncio.sleep(1)
-        await cd.edit_text(
-            f"🚀 <b>انطلقوا! بدأت جلسة الدراسة {ordinal_f}!</b>\n\n"
-            f"⏱ الدراسة: <b>{study_min}</b> دقيقة | ☕ الاستراحة: <b>{break_min}</b> دقيقة\n\n"
-            f"{mentions}",
-            parse_mode="HTML",
+        # حذف بطاقة الانتظار الأصلية
+        old_msg_id = session.get("message_id")
+        if old_msg_id:
+            try:
+                await context.bot.delete_message(tgt_chat, old_msg_id)
+            except Exception:
+                pass
+        # تحويل رسالة العدّ إلى بطاقة السشن النشط
+        session["phase"] = "studying"
+        names = " | ".join(_html_module.escape(p["name"]) for p in session["participants"])
+        creator = _html_module.escape(session["creator_name"])
+        mentions = build_mentions_html(session["participants"])
+        active_text = (
+            f"📚 <b>جلسة الدراسة {ordinal_f} — نشطة!</b>\n\n"
+            f"👤 المنظم: {creator}\n"
+            f"⏱ الدراسة: <b>{study_min}</b> دقيقة | ☕ الاستراحة: <b>{break_min}</b> دقيقة\n"
+            f"👥 المشاركون ({len(session['participants'])}): {names}\n\n"
+            f"🔴 <i>جارٍ الدراسة...</i>\n\n"
+            f"{mentions}"
         )
+        join_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{tgt_chat}:{tgt_sess}"),
+        ]])
+        await cd.edit_text(active_text, reply_markup=join_kb, parse_mode="HTML")
+        session["message_id"] = cd.message_id
         # بدء التايمر
         task = asyncio.create_task(run_session_timer(tgt_chat, tgt_sess, context.bot))
         _sessions[tgt_chat][tgt_sess]["task"] = task
@@ -3615,6 +3596,50 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+
+    # ============================================================
+    # معالجة إدخال مدة السشن المخصص
+    # ============================================================
+    if user_id and user_id in _pending_session_config:
+        state = _pending_session_config[user_id]
+        val = text.strip()
+        if not val.isdigit() or not (1 <= int(val) <= 300):
+            await update.message.reply_text("❗ أدخل رقماً صحيحاً بين 1 و 300.")
+            return
+        val = int(val)
+        if state["step"] == "study":
+            _pending_session_config[user_id] = {
+                "step": "break",
+                "chat_id": state["chat_id"],
+                "study": val,
+            }
+            await update.message.reply_text(
+                f"✅ <b>الدراسة: {val} دقيقة</b>\n\n📝 الآن أرسل مدة الاستراحة بالدقائق",
+                parse_mode="HTML",
+            )
+            return
+        elif state["step"] == "break":
+            study = state["study"]
+            break_t = val
+            chat_id_target = state["chat_id"]
+            del _pending_session_config[user_id]
+            if len(_sessions.get(chat_id_target, {})) >= _max_sessions:
+                await update.message.reply_text(
+                    f"عذراً، وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة 🚫"
+                )
+                return
+            sess_id = _create_session(
+                chat_id_target, study, break_t,
+                user_id,
+                update.effective_user.first_name,
+                update.effective_user.username or "",
+            )
+            sess_text, sess_keyboard = build_session_message(chat_id_target, sess_id)
+            msg = await context.bot.send_message(
+                chat_id_target, sess_text, reply_markup=sess_keyboard, parse_mode="HTML"
+            )
+            _sessions[chat_id_target][sess_id]["message_id"] = msg.message_id
+            return
 
     # ============================================================
     # معالجة حالة انتظار إضافة رد تلقائي
