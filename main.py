@@ -2575,16 +2575,81 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("✅ تم بدء السشن!")
         return
 
-    # ── تخصيص المدة ──
+    # ── تخصيص المدة — الخطوة 1: اختر وقت الدراسة ──
     if data == "sess_custom":
-        _pending_session_config[user.id] = {
-            "step": "study",
-            "chat_id": chat_id,
-            "study": None,
-        }
         await query.answer()
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("1 د", callback_data="sess_cs:1"),
+                InlineKeyboardButton("5 د", callback_data="sess_cs:5"),
+                InlineKeyboardButton("10 د", callback_data="sess_cs:10"),
+                InlineKeyboardButton("15 د", callback_data="sess_cs:15"),
+            ],
+            [
+                InlineKeyboardButton("20 د", callback_data="sess_cs:20"),
+                InlineKeyboardButton("25 د", callback_data="sess_cs:25"),
+                InlineKeyboardButton("30 د", callback_data="sess_cs:30"),
+                InlineKeyboardButton("45 د", callback_data="sess_cs:45"),
+            ],
+            [
+                InlineKeyboardButton("60 د", callback_data="sess_cs:60"),
+                InlineKeyboardButton("90 د", callback_data="sess_cs:90"),
+                InlineKeyboardButton("120 د", callback_data="sess_cs:120"),
+            ],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="sess_back")],
+        ])
         await query.message.edit_text(
-            "⚙️ *تخصيص السشن*\n\nكم دقيقة تريد للدراسة؟\n_(اكتب الرقم في المحادثة)_",
+            "⚙️ *تخصيص السشن*\n\n*الخطوة 1/2 — اختر مدة الدراسة:*",
+            reply_markup=kb,
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── تخصيص المدة — الخطوة 2: اختر وقت الاستراحة ──
+    if data.startswith("sess_cs:"):
+        study_picked = int(data.split(":")[1])
+        await query.answer()
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("1 د", callback_data=f"sess_p:{study_picked}:1"),
+                InlineKeyboardButton("5 د", callback_data=f"sess_p:{study_picked}:5"),
+                InlineKeyboardButton("10 د", callback_data=f"sess_p:{study_picked}:10"),
+            ],
+            [
+                InlineKeyboardButton("15 د", callback_data=f"sess_p:{study_picked}:15"),
+                InlineKeyboardButton("20 د", callback_data=f"sess_p:{study_picked}:20"),
+                InlineKeyboardButton("30 د", callback_data=f"sess_p:{study_picked}:30"),
+            ],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="sess_custom")],
+        ])
+        await query.message.edit_text(
+            f"⚙️ *تخصيص السشن*\n\n"
+            f"✅ الدراسة: *{study_picked}* دقيقة\n\n"
+            f"*الخطوة 2/2 — اختر مدة الاستراحة:*",
+            reply_markup=kb,
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── رجوع للقائمة الرئيسية ──
+    if data == "sess_back":
+        await query.answer()
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⏱ 25 / 5 دقيقة", callback_data="sess_p:25:5"),
+                InlineKeyboardButton("⏱ 45 / 15 دقيقة", callback_data="sess_p:45:15"),
+            ],
+            [
+                InlineKeyboardButton("⏱ 50 / 10 دقيقة", callback_data="sess_p:50:10"),
+                InlineKeyboardButton("⏱ 90 / 20 دقيقة", callback_data="sess_p:90:20"),
+            ],
+            [InlineKeyboardButton("⚙️ تخصيص", callback_data="sess_custom")],
+        ])
+        await query.message.edit_text(
+            "🎯 *إنشاء جلسة دراسة*\n\n"
+            "اختر مدة الدراسة والاستراحة:\n"
+            "_(دراسة / استراحة — بالدقائق)_",
+            reply_markup=keyboard,
             parse_mode="Markdown",
         )
         return
@@ -3505,48 +3570,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ============================================================
-    # معالجة حالة انتظار تخصيص السشن
-    # ============================================================
-    if user_id and user_id in _pending_session_config:
-        state = _pending_session_config[user_id]
-        if not text.isdigit() or int(text) < 1 or int(text) > 300:
-            await update.message.reply_text("❗ أدخل رقماً صحيحاً بين 1 و 300.")
-            return
-        val = int(text)
-        if state["step"] == "study":
-            _pending_session_config[user_id] = {
-                "step": "break",
-                "chat_id": state["chat_id"],
-                "study": val,
-            }
-            await update.message.reply_text(
-                f"✅ وقت الدراسة: {val} دقيقة\n\nكم دقيقة تريد للاستراحة؟"
-            )
-            return
-        elif state["step"] == "break":
-            study = state["study"]
-            break_t = val
-            chat_id_target = state["chat_id"]
-            del _pending_session_config[user_id]
-            # فحص الحد لهذه المجموعة
-            if len(_sessions.get(chat_id_target, {})) >= _max_sessions:
-                await update.message.reply_text(
-                    f"عذراً، وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة 🚫"
-                )
-                return
-            sess_id = _create_session(
-                chat_id_target, study, break_t,
-                user_id,
-                update.effective_user.first_name,
-                update.effective_user.username or "",
-            )
-            sess_text, sess_keyboard = build_session_message(chat_id_target, sess_id)
-            msg = await update.message.reply_text(sess_text, reply_markup=sess_keyboard, parse_mode="Markdown")
-            _sessions[chat_id_target][sess_id]["message_id"] = msg.message_id
-            task = asyncio.create_task(run_session_timer(chat_id_target, sess_id, context.bot))
-            _sessions[chat_id_target][sess_id]["task"] = task
-            return
 
     # ============================================================
     # معالجة حالة انتظار إضافة رد تلقائي
