@@ -1,4 +1,5 @@
 import os
+import html as _html_module
 import logging
 import random
 import asyncio
@@ -2378,7 +2379,7 @@ async def handle_rate_limit_callback(update: Update, context: ContextTypes.DEFAU
 # ============================================================
 
 def build_mentions(participants: list) -> str:
-    """يبني نص منشن لكل المشاركين."""
+    """يبني نص منشن لكل المشاركين (Markdown v1 — محجوز للرسائل القديمة)."""
     parts = []
     for p in participants:
         if p.get("username"):
@@ -2388,12 +2389,23 @@ def build_mentions(participants: list) -> str:
     return " ".join(parts) if parts else ""
 
 
+def build_mentions_html(participants: list) -> str:
+    """يبني نص منشن بصيغة HTML — آمن ضد أي أحرف خاصة."""
+    parts = []
+    for p in participants:
+        if p.get("username"):
+            parts.append(f"@{p['username']}")
+        else:
+            safe_name = _html_module.escape(p["name"])
+            parts.append(f'<a href="tg://user?id={p["id"]}">{safe_name}</a>')
+    return " ".join(parts) if parts else ""
+
+
 def build_session_message(chat_id: int, sess_id: int) -> tuple:
-    """يبني نص رسالة السشن مع زر الانضمام."""
+    """يبني نص رسالة السشن مع أزرار الانضمام والبدء."""
     session = _sessions[chat_id][sess_id]
     participants = session["participants"]
     session_num = session.get("session_num", 1)
-    ordinal = _session_ordinal(session_num)
     if participants:
         names = " | ".join(p["name"] for p in participants)
     else:
@@ -2406,9 +2418,14 @@ def build_session_message(chat_id: int, sess_id: int) -> tuple:
         f"☕ الاستراحة: {session['break']} دقيقة\n"
         f"👥 المشاركون ({len(participants)}): {names}"
     )
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}"),
-    ]])
+    task = session.get("task")
+    already_started = task is not None and not task.done()
+    rows = [
+        [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
+    ]
+    if not already_started:
+        rows.append([InlineKeyboardButton("🚀 بدء السشن", callback_data=f"sess_start:{chat_id}:{sess_id}")])
+    keyboard = InlineKeyboardMarkup(rows)
     return text, keyboard
 
 
@@ -2422,28 +2439,18 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         break_min = session["break"]
         session_num = session.get("session_num", 1)
 
-        # ── رسالة تأكيد بدء العدّ ──
-        mentions_start = build_mentions(_sessions[chat_id][sess_id]["participants"])
-        await bot.send_message(
-            chat_id,
-            f"🚀 *بدأت جلسة الدراسة {_session_ordinal_f(session_num)}!*\n\n"
-            f"⏱ الدراسة: *{study_min}* دقيقة | ☕ الاستراحة: *{break_min}* دقيقة\n\n"
-            f"{mentions_start}",
-            parse_mode="Markdown",
-        )
-
         # ── انتظار وقت الدراسة ──
         await asyncio.sleep(study_min * 60)
         if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
         session = _sessions[chat_id][sess_id]
-        mentions = build_mentions(session["participants"])
+        mentions = build_mentions_html(session["participants"])
         await bot.send_message(
             chat_id,
-            f"🎉🎊🥳 *أحسنتم! انتهت جلسة الدراسة {_session_ordinal_f(session_num)}!*\n\n"
+            f"🎉🎊🥳 <b>أحسنتم! انتهت جلسة الدراسة {_session_ordinal_f(session_num)}!</b>\n\n"
             f"استحقيتوا راحة {break_min} دقيقة ☕\n\n"
             f"{mentions}",
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
 
         # ── انتظار وقت الاستراحة ──
@@ -2451,7 +2458,7 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
         session = _sessions[chat_id][sess_id]
-        mentions = build_mentions(session["participants"])
+        mentions = build_mentions_html(session["participants"])
         next_num = session_num + 1
         next_ord = _session_ordinal(next_num)
 
@@ -2470,11 +2477,11 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         ]])
         await bot.send_message(
             chat_id,
-            f"☕ *انتهت الاستراحة!*\n\n"
+            f"☕ <b>انتهت الاستراحة!</b>\n\n"
             f"{mentions}\n\n"
             f"هل أنتم مستعدون للسشن {next_ord}؟ 💪",
             reply_markup=keyboard,
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
 
         # حذف السشن القديم
@@ -2570,9 +2577,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         text, keyboard = build_session_message(chat_id, sess_id)
         msg = await context.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
         _sessions[chat_id][sess_id]["message_id"] = msg.message_id
-        task = asyncio.create_task(run_session_timer(chat_id, sess_id, context.bot))
-        _sessions[chat_id][sess_id]["task"] = task
-        await query.answer("✅ تم بدء السشن!")
+        await query.answer("✅ اشترك وابدأ السشن!")
         return
 
     # ── تخصيص المدة — الخطوة 1: اختر وقت الدراسة ──
@@ -2677,6 +2682,53 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("✅ انضممت للسشن!")
         return
 
+    # ── بدء السشن — عدّ تنازلي ──
+    if data.startswith("sess_start:"):
+        parts = data.split(":")
+        tgt_chat = int(parts[1])
+        tgt_sess = int(parts[2])
+        if tgt_chat not in _sessions or tgt_sess not in _sessions[tgt_chat]:
+            await query.answer("❌ السشن انتهى أو لم يعد موجوداً.", show_alert=True)
+            return
+        session = _sessions[tgt_chat][tgt_sess]
+        # منع بدء مزدوج
+        existing_task = session.get("task")
+        if existing_task and not existing_task.done():
+            await query.answer("⚡ السشن بدأ بالفعل!", show_alert=True)
+            return
+        await query.answer()
+        study_min = session["study"]
+        break_min = session["break"]
+        session_num = session.get("session_num", 1)
+        ordinal_f = _session_ordinal_f(session_num)
+        mentions = build_mentions(session["participants"])
+        # إزالة زر "بدء" من البطاقة — يبقى فقط زر "انضم"
+        try:
+            await query.message.edit_reply_markup(
+                InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{tgt_chat}:{tgt_sess}"),
+                ]])
+            )
+        except Exception:
+            pass
+        # العدّ التنازلي
+        cd = await context.bot.send_message(tgt_chat, "3️⃣")
+        await asyncio.sleep(1)
+        await cd.edit_text("2️⃣")
+        await asyncio.sleep(1)
+        await cd.edit_text("1️⃣")
+        await asyncio.sleep(1)
+        await cd.edit_text(
+            f"🚀 <b>انطلقوا! بدأت جلسة الدراسة {ordinal_f}!</b>\n\n"
+            f"⏱ الدراسة: <b>{study_min}</b> دقيقة | ☕ الاستراحة: <b>{break_min}</b> دقيقة\n\n"
+            f"{mentions}",
+            parse_mode="HTML",
+        )
+        # بدء التايمر
+        task = asyncio.create_task(run_session_timer(tgt_chat, tgt_sess, context.bot))
+        _sessions[tgt_chat][tgt_sess]["task"] = task
+        return
+
     # ── بدء السشن القادم ──
     if data.startswith("sess_next:"):
         parts = data.split(":")
@@ -2703,16 +2755,9 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             pass
         text, keyboard = build_session_message(orig_chat, sess_id)
-        msg = await context.bot.send_message(
-            orig_chat,
-            f"🔥💪 *انطلق السشن {next_ord}!* 🔥💪\n\n" + text.split("\n\n", 1)[-1],
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+        msg = await context.bot.send_message(orig_chat, text, reply_markup=keyboard, parse_mode="Markdown")
         _sessions[orig_chat][sess_id]["message_id"] = msg.message_id
-        task = asyncio.create_task(run_session_timer(orig_chat, sess_id, context.bot))
-        _sessions[orig_chat][sess_id]["task"] = task
-        await query.answer(f"🔥 بدأ السشن {next_ord}!")
+        await query.answer(f"✅ السشن {next_ord} جاهز — اضغط بدء!")
         return
 
 
