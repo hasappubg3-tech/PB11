@@ -273,12 +273,26 @@ _pending_auto_reply: dict = {}
 # ============================================================
 # 🎯 نظام السشنات (جلسات الدراسة)
 # ============================================================
-# {chat_id: {"study": int, "break": int,
-#            "participants": [{"id": int, "name": str}],
-#            "creator_name": str, "creator_id": int, "message_id": int|None}}
+# {chat_id: {sess_id: {"study": int, "break": int, "session_num": int,
+#             "participants": [...], "creator_name": str, "creator_id": int,
+#             "message_id": int|None, "task": Task, "sess_id": int}}}
 _sessions: dict = {}
+# {chat_id: int} — عداد توليد sess_id لكل مجموعة
+_session_counters: dict = {}
+# {(chat_id, sess_id): {study, break, participants, creator_id, creator_name, next_num}}
+_pending_next_session: dict = {}
 # {user_id: {"step": "study"|"break", "chat_id": int, "study": int|None}}
 _pending_session_config: dict = {}
+
+# أسماء ترتيبية للسشنات
+_SESSION_ORDINALS_AR = {
+    1: "الأول", 2: "الثاني", 3: "الثالث", 4: "الرابع", 5: "الخامس",
+    6: "السادس", 7: "السابع", 8: "الثامن", 9: "التاسع", 10: "العاشر",
+}
+
+
+def _session_ordinal(n: int) -> str:
+    return _SESSION_ORDINALS_AR.get(n, str(n))
 
 # مجموعة معرّفات المالك الذين ينتظرون إدخال مفاتيح API جديدة
 _pending_api_key_input: set = set()
@@ -373,7 +387,7 @@ FOCUS_WARNINGS = [
     "شنو قلت؟ ما سمعت — ادرس 😒",
     "الدراسة أولاً، التسخيت بعدين ⏰",
     "انت اللي طلبت منع التسخيت، وانت تخالفه؟ 📵",
-    "كل دقيقة تتسخطها من الدراسة خسارة 📉",
+    "كل دقيقة تسختها من الدراسة خسارة 📉",
     "ما أتوقع منك هيچ 😏 — ارجع للكتاب",
     "أنا كنت أحسبك تدرس! ",
     "الله يعين على هالدراسة 🙃",
@@ -489,12 +503,12 @@ BOT_RESPONSES = [
     "نعم، شتريد؟",
     "تفضل، أنا هنا.",
     "هلا فيك، شبيك؟",
-    "نعم، أمرني.",
+    "نعم.",
     "أسمعك، تفضل.",
-    "هلا، أمرني.",
+    "هلا.",
     "نعم؟",
     "شبيك؟",
-    "أمرني.",
+    "مالي خلك.",
     "شتريد؟",
 ]
 
@@ -515,9 +529,9 @@ _SALAM_RESPONSES = [
     "وعليكم السلام ورحمة الله وبركاته، هلا وغلا!",
     "وعليكم السلام، هلا بيك!",
     "وعليكم السلام، أهلاً وسهلاً!",
-    "وعليكم السلام ورحمة الله، شلونك؟",
+    "وعليكم السلام ورحمة الله،",
     "وعليكم السلام، تفضل.",
-    "وعليكم السلام، أمرني.",
+    "وعليكم السلام.",
 ]
 
 _MORNING_RESPONSES = [
@@ -821,8 +835,8 @@ def get_smart_fallback(first_name: str, message: str) -> str:
 
     # الكشف يعتمد على وجود العبارة كاملة في النص (متلاصقة) بغض النظر عن طول الرسالة
     salam_words = ["السلام عليكم", "سلام عليكم", "السلام عليكم ورحمة الله", "السلام عليكم ورحمة الله وبركاته"]
-    morning_words = ["صباح الخير", "صباح النور", "صباح الورد", "صباح الياسمين", "صباح العسل"]
-    evening_words = ["مساء الخير", "مساء النور", "مساء الورد"]
+    morning_words = ["صباح الخير", "صباح الياسمين", "صباح العسل"]
+    evening_words = ["مساء الخير", "مساء الورد"]
     greet_words = ["شلونك", "كيفك", "كيف حالك", "كيف الحال", "شخبارك", "شلون حالك", "عامل ايش", "عامل إيش", "شو أخبارك", "شو اخبارك"]
 
     if any(w in msg for w in salam_words):
@@ -1634,7 +1648,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
     # ── إعدادات السشنات ──
     # ═══════════════════════════════════════
     if data == "settings_sessions":
-        active = len(_sessions)
+        active = sum(len(v) for v in _sessions.values())
         rows = [
             [InlineKeyboardButton("📊 الحد الأقصى للسشنات المتزامنة:", callback_data="noop")],
             [
@@ -1660,7 +1674,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
     if data.startswith("settings_sess_max:"):
         _max_sessions = int(data.split(":")[1])
         await query.answer(f"✅ الحد الأقصى صار {_max_sessions}")
-        active = len(_sessions)
+        active = sum(len(v) for v in _sessions.values())
         rows = [
             [InlineKeyboardButton("📊 الحد الأقصى للسشنات المتزامنة:", callback_data="noop")],
             [
@@ -2357,85 +2371,102 @@ def build_mentions(participants: list) -> str:
     return " ".join(parts) if parts else ""
 
 
-def build_session_message(chat_id: int) -> tuple:
+def build_session_message(chat_id: int, sess_id: int) -> tuple:
     """يبني نص رسالة السشن مع زر الانضمام."""
-    session = _sessions[chat_id]
+    session = _sessions[chat_id][sess_id]
     participants = session["participants"]
+    session_num = session.get("session_num", 1)
+    ordinal = _session_ordinal(session_num)
     if participants:
         names = " | ".join(p["name"] for p in participants)
     else:
         names = "لا أحد بعد"
     text = (
-        f"🎯 *جلسة دراسة نشطة!*\n\n"
+        f"🎯 *جلسة الدراسة {ordinal}!*\n\n"
         f"👤 المنظم: {session['creator_name']}\n"
         f"📚 الدراسة: {session['study']} دقيقة\n"
         f"☕ الاستراحة: {session['break']} دقيقة\n"
         f"👥 المشاركون ({len(participants)}): {names}"
     )
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✋ انضم للسشن", callback_data="sess_join"),
+        InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}"),
     ]])
     return text, keyboard
 
 
-async def run_session_timer(chat_id: int, bot):
+async def run_session_timer(chat_id: int, sess_id: int, bot):
     """مؤقت السشن: ينبّه عند انتهاء الدراسة ثم الاستراحة."""
     try:
-        session = _sessions.get(chat_id)
-        if not session:
+        if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
+        session = _sessions[chat_id][sess_id]
         study_min = session["study"]
         break_min = session["break"]
+        session_num = session.get("session_num", 1)
 
         # ── انتظار وقت الدراسة ──
         await asyncio.sleep(study_min * 60)
-        if chat_id not in _sessions:
+        if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
-        session = _sessions[chat_id]
+        session = _sessions[chat_id][sess_id]
         mentions = build_mentions(session["participants"])
         await bot.send_message(
             chat_id,
-            f"⏰ *انتهى وقت الدراسة!*\n\n"
-            f"خذوا استراحة {break_min} دقيقة ☕\n\n"
+            f"🎉🎊🥳 *أحسنتم! انتهى وقت الدراسة {_session_ordinal(session_num)}!*\n\n"
+            f"استحقيتوا راحة {break_min} دقيقة ☕🎉\n\n"
             f"{mentions}",
             parse_mode="Markdown",
         )
 
         # ── انتظار وقت الاستراحة ──
         await asyncio.sleep(break_min * 60)
-        if chat_id not in _sessions:
+        if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
-        session = _sessions[chat_id]
+        session = _sessions[chat_id][sess_id]
         mentions = build_mentions(session["participants"])
+        next_num = session_num + 1
+        next_ord = _session_ordinal(next_num)
+
+        # حفظ بيانات السشن القادم
+        _pending_next_session[(chat_id, sess_id)] = {
+            "study": study_min,
+            "break": break_min,
+            "participants": list(session["participants"]),
+            "creator_id": session["creator_id"],
+            "creator_name": session["creator_name"],
+            "next_num": next_num,
+        }
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"🚀 بدء السشن {next_ord}", callback_data=f"sess_next:{chat_id}:{sess_id}"),
+        ]])
         await bot.send_message(
             chat_id,
-            f"📚 *انتهت الاستراحة!*\n\n"
-            f"عودوا للدراسة 💪\n\n"
-            f"{mentions}",
+            f"☕ *انتهت الاستراحة!*\n\n"
+            f"{mentions}\n\n"
+            f"هل أنتم مستعدون للسشن {next_ord}؟ 💪",
+            reply_markup=keyboard,
             parse_mode="Markdown",
         )
-        _sessions.pop(chat_id, None)
+
+        # حذف السشن القديم
+        _sessions[chat_id].pop(sess_id, None)
+        if not _sessions.get(chat_id):
+            _sessions.pop(chat_id, None)
 
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        logger.warning(f"خطأ في مؤقت السشن للمجموعة {chat_id}: {e}")
+        logger.warning(f"خطأ في مؤقت السشن {sess_id} للمجموعة {chat_id}: {e}")
 
 
 async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يعرض قائمة اختيار مدة السشن."""
     chat_id = update.effective_chat.id
-    if chat_id in _sessions:
-        text, keyboard = build_session_message(chat_id)
+    group_sessions = _sessions.get(chat_id, {})
+    if len(group_sessions) >= _max_sessions:
         await update.message.reply_text(
-            "⚠️ يوجد سشن نشط في هذه المجموعة!\n\n" + text,
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
-        return
-    if len(_sessions) >= _max_sessions:
-        await update.message.reply_text(
-            f"عذراً، يوجد أكثر من {_max_sessions} سشن حالياً 🚫\n"
+            f"عذراً، يوجد {len(group_sessions)} سشن نشط حالياً في هذه المجموعة 🚫\n"
             f"انتظر انتهاء أحد السشنات ثم حاول مجدداً."
         )
         return
@@ -2460,8 +2491,35 @@ async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
 
 
+def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
+                    creator_name: str, creator_username: str, session_num: int = 1,
+                    extra_participants: list = None) -> int:
+    """ينشئ سشناً جديداً ويعيد sess_id."""
+    _session_counters[chat_id] = _session_counters.get(chat_id, 0) + 1
+    sess_id = _session_counters[chat_id]
+    if chat_id not in _sessions:
+        _sessions[chat_id] = {}
+    participants = [{"id": creator_id, "name": creator_name, "username": creator_username}]
+    if extra_participants:
+        for p in extra_participants:
+            if p["id"] != creator_id:
+                participants.append(p)
+    _sessions[chat_id][sess_id] = {
+        "study": study,
+        "break": break_t,
+        "participants": participants,
+        "creator_name": creator_name,
+        "creator_id": creator_id,
+        "message_id": None,
+        "task": None,
+        "sess_id": sess_id,
+        "session_num": session_num,
+    }
+    return sess_id
+
+
 async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعالج أزرار السشن: اختيار مدة، تخصيص، انضمام."""
+    """يعالج أزرار السشن: اختيار مدة، تخصيص، انضمام، بدء السشن القادم."""
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat.id
@@ -2472,26 +2530,20 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         parts = data.split(":")
         study = int(parts[1])
         break_t = int(parts[2])
-        _sessions[chat_id] = {
-            "study": study,
-            "break": break_t,
-            "participants": [{"id": user.id, "name": user.first_name, "username": user.username or ""}],
-            "creator_name": user.first_name,
-            "creator_id": user.id,
-            "message_id": None,
-            "task": None,
-        }
+        # فحص الحد لهذه المجموعة
+        if len(_sessions.get(chat_id, {})) >= _max_sessions:
+            await query.answer(f"❌ وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة.", show_alert=True)
+            return
+        sess_id = _create_session(chat_id, study, break_t, user.id, user.first_name, user.username or "")
         try:
             await query.message.delete()
         except Exception:
             pass
-        text, keyboard = build_session_message(chat_id)
-        msg = await context.bot.send_message(
-            chat_id, text, reply_markup=keyboard, parse_mode="Markdown"
-        )
-        _sessions[chat_id]["message_id"] = msg.message_id
-        task = asyncio.create_task(run_session_timer(chat_id, context.bot))
-        _sessions[chat_id]["task"] = task
+        text, keyboard = build_session_message(chat_id, sess_id)
+        msg = await context.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+        _sessions[chat_id][sess_id]["message_id"] = msg.message_id
+        task = asyncio.create_task(run_session_timer(chat_id, sess_id, context.bot))
+        _sessions[chat_id][sess_id]["task"] = task
         await query.answer("✅ تم بدء السشن!")
         return
 
@@ -2510,11 +2562,14 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
     # ── الانضمام للسشن ──
-    if data == "sess_join":
-        if chat_id not in _sessions:
+    if data.startswith("sess_join:"):
+        parts = data.split(":")
+        tgt_chat = int(parts[1])
+        tgt_sess = int(parts[2])
+        if tgt_chat not in _sessions or tgt_sess not in _sessions[tgt_chat]:
             await query.answer("❌ السشن انتهى أو لم يبدأ بعد.", show_alert=True)
             return
-        session = _sessions[chat_id]
+        session = _sessions[tgt_chat][tgt_sess]
         if any(p["id"] == user.id for p in session["participants"]):
             await query.answer("✅ أنت مشارك بالفعل!", show_alert=True)
             return
@@ -2523,12 +2578,48 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.message.delete()
         except Exception:
             pass
-        text, keyboard = build_session_message(chat_id)
-        msg = await context.bot.send_message(
-            chat_id, text, reply_markup=keyboard, parse_mode="Markdown"
-        )
+        text, keyboard = build_session_message(tgt_chat, tgt_sess)
+        msg = await context.bot.send_message(tgt_chat, text, reply_markup=keyboard, parse_mode="Markdown")
         session["message_id"] = msg.message_id
         await query.answer("✅ انضممت للسشن!")
+        return
+
+    # ── بدء السشن القادم ──
+    if data.startswith("sess_next:"):
+        parts = data.split(":")
+        orig_chat = int(parts[1])
+        orig_sess = int(parts[2])
+        pending = _pending_next_session.pop((orig_chat, orig_sess), None)
+        if not pending:
+            await query.answer("❌ انتهت صلاحية هذا الزر.", show_alert=True)
+            return
+        if len(_sessions.get(orig_chat, {})) >= _max_sessions:
+            await query.answer(f"❌ وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة.", show_alert=True)
+            return
+        next_num = pending["next_num"]
+        next_ord = _session_ordinal(next_num)
+        # إنشاء السشن الجديد بنفس المشاركين السابقين
+        sess_id = _create_session(
+            orig_chat, pending["study"], pending["break"],
+            pending["creator_id"], pending["creator_name"], "",
+            session_num=next_num,
+            extra_participants=pending["participants"],
+        )
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        text, keyboard = build_session_message(orig_chat, sess_id)
+        msg = await context.bot.send_message(
+            orig_chat,
+            f"🔥💪 *انطلق السشن {next_ord}!* 🔥💪\n\n" + text.split("\n\n", 1)[-1],
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+        _sessions[orig_chat][sess_id]["message_id"] = msg.message_id
+        task = asyncio.create_task(run_session_timer(orig_chat, sess_id, context.bot))
+        _sessions[orig_chat][sess_id]["task"] = task
+        await query.answer(f"🔥 بدأ السشن {next_ord}!")
         return
 
 
@@ -2537,31 +2628,35 @@ async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id if update.effective_user else None
 
-    if chat_id not in _sessions:
+    group_sessions = _sessions.get(chat_id, {})
+    if not group_sessions:
         await update.message.reply_text("⚠️ لا يوجد سشن نشط حالياً.")
         return
 
-    session = _sessions[chat_id]
-    creator_id = session.get("creator_id")
-
-    # السماح فقط لقائد السشن أو مالك البوت
-    if user_id != creator_id and user_id != OWNER_CHAT_ID:
-        creator_name = session.get("creator_name", "قائد السشن")
-        await update.message.reply_text(
-            f"❌ فقط {creator_name} (قائد السشن) أو مالك البوت يقدر يلغي هذا السشن."
-        )
+    # فحص الصلاحية — قائد أي سشن أو المالك
+    caller_is_creator = any(s.get("creator_id") == user_id for s in group_sessions.values())
+    if not caller_is_creator and user_id != OWNER_CHAT_ID:
+        await update.message.reply_text("❌ فقط قائد السشن أو مالك البوت يقدر يلغي السشن.")
         return
 
-    _sessions.pop(chat_id)
-    task = session.get("task")
-    if task and not task.done():
-        task.cancel()
-    count = len(session["participants"])
-    names = " | ".join(p["name"] for p in session["participants"]) or "لا أحد"
+    # إلغاء جميع السشنات في المجموعة
+    lines = []
+    for sid, session in list(group_sessions.items()):
+        task = session.get("task")
+        if task and not task.done():
+            task.cancel()
+        _pending_next_session.pop((chat_id, sid), None)
+        count = len(session["participants"])
+        names = " | ".join(p["name"] for p in session["participants"]) or "لا أحد"
+        ordinal = _session_ordinal(session.get("session_num", 1))
+        lines.append(
+            f"📌 السشن {ordinal}: {session['study']}د دراسة / {session['break']}د استراحة — "
+            f"👥 {count} مشارك ({names})"
+        )
+    _sessions.pop(chat_id, None)
+    summary = "\n".join(lines)
     await update.message.reply_text(
-        f"🏁 *انتهى السشن!*\n\n"
-        f"📚 الدراسة: {session['study']} دقيقة | ☕ الاستراحة: {session['break']} دقيقة\n"
-        f"👥 المشاركون ({count}): {names}",
+        f"🏁 *انتهت السشنات!*\n\n{summary}",
         parse_mode="Markdown",
     )
 
@@ -3406,26 +3501,23 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break_t = val
             chat_id_target = state["chat_id"]
             del _pending_session_config[user_id]
-            _sessions[chat_id_target] = {
-                "study": study,
-                "break": break_t,
-                "participants": [{
-                    "id": user_id,
-                    "name": update.effective_user.first_name,
-                    "username": update.effective_user.username or "",
-                }],
-                "creator_name": update.effective_user.first_name,
-                "creator_id": user_id,
-                "message_id": None,
-                "task": None,
-            }
-            sess_text, sess_keyboard = build_session_message(chat_id_target)
-            msg = await update.message.reply_text(
-                sess_text, reply_markup=sess_keyboard, parse_mode="Markdown"
+            # فحص الحد لهذه المجموعة
+            if len(_sessions.get(chat_id_target, {})) >= _max_sessions:
+                await update.message.reply_text(
+                    f"عذراً، وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة 🚫"
+                )
+                return
+            sess_id = _create_session(
+                chat_id_target, study, break_t,
+                user_id,
+                update.effective_user.first_name,
+                update.effective_user.username or "",
             )
-            _sessions[chat_id_target]["message_id"] = msg.message_id
-            task = asyncio.create_task(run_session_timer(chat_id_target, context.bot))
-            _sessions[chat_id_target]["task"] = task
+            sess_text, sess_keyboard = build_session_message(chat_id_target, sess_id)
+            msg = await update.message.reply_text(sess_text, reply_markup=sess_keyboard, parse_mode="Markdown")
+            _sessions[chat_id_target][sess_id]["message_id"] = msg.message_id
+            task = asyncio.create_task(run_session_timer(chat_id_target, sess_id, context.bot))
+            _sessions[chat_id_target][sess_id]["task"] = task
             return
 
     # ============================================================
@@ -3528,8 +3620,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mode = sess["mode"]
                 name = sess.get("name", update.effective_user.first_name if update.effective_user else "")
                 if mode == "warn":
-                    warning = random.choice(FOCUS_WARNINGS)
-                    await update.message.reply_text(f"{name}، {warning}")
+                    sess["warn_msg_count"] = sess.get("warn_msg_count", 0) + 1
+                    if sess["warn_msg_count"] % 5 == 1:
+                        warning = random.choice(FOCUS_WARNINGS)
+                        await update.message.reply_text(f"{name}، {warning}")
                 elif mode == "delete":
                     try:
                         await update.message.delete()
