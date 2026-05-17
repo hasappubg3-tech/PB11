@@ -2523,14 +2523,15 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton(f"🚀 بدء السشن {next_ord}", callback_data=f"sess_next:{chat_id}:{sess_id}"),
         ]])
+        participant_lines = "\n".join(
+            f"• {_html_module.escape(p['name'])}" + (f" @{p['username']}" if p.get('username') else "")
+            for p in session["participants"]
+        )
         await bot.send_message(
             chat_id,
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"☕ <b>انتهت الاستراحة!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"🚀 الوقت إلچي نرجع نذاكر!\n"
-            f"هل أنتم مستعدون للسشن {next_ord}؟ 💪\n\n"
-            f"👥 <b>المشاركون:</b>\n{names}\n\n"
+            f"☕ <b>انتهت الاستراحة!</b>\n\n"
+            f"👥 <b>المشاركون</b>\n{participant_lines}\n\n"
+            f"مستعدون للسشن {next_ord}؟ 💪\n\n"
             f"{mentions}",
             reply_markup=keyboard,
             parse_mode="HTML",
