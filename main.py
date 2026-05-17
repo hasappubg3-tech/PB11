@@ -1,4 +1,5 @@
 import os
+import json
 import html as _html_module
 import logging
 import random
@@ -410,6 +411,77 @@ FOCUS_WARNINGS = [
 
 IGNORE_DURATION_HOURS = 1
 WARNING_EXPIRY_MINUTES = 30
+
+# ============================================================
+# 💾 نظام حفظ البيانات
+# ============================================================
+DATA_FILE = "bot_data.json"
+
+
+def save_data():
+    """يحفظ كل الإعدادات والإحصائيات في ملف JSON."""
+    try:
+        data = {
+            "session_stats": {
+                str(cid): {str(uid): u for uid, u in users.items()}
+                for cid, users in _session_stats.items()
+            },
+            "allowed_chat_ids": list(_allowed_chat_ids),
+            "bot_admins": list(_bot_admins),
+            "allowed_group_owner_usernames": list(_allowed_group_owner_usernames),
+            "owner_known_chats": list(_owner_known_chats),
+            "known_chat_names": {str(k): v for k, v in _known_chat_names.items()},
+            "ai_enabled_chats": {str(k): v for k, v in _ai_enabled_chats.items()},
+            "ai_daily_limit": {str(k): v for k, v in _ai_daily_limit.items()},
+            "ai_daily_usage": {str(k): v for k, v in _ai_daily_usage.items()},
+            "max_sessions": _max_sessions,
+            "auto_replies": {str(k): v for k, v in _auto_replies.items()},
+            "history_enabled": _history_enabled,
+            "history_max_messages": _history_max_messages,
+            "history_expiry_minutes": _history_expiry_minutes,
+            "gemini_api_keys": list(_gemini_api_keys),
+        }
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"⚠️ فشل حفظ البيانات: {e}")
+
+
+def load_data():
+    """يحمّل الإعدادات والإحصائيات من ملف JSON عند بدء التشغيل."""
+    global _max_sessions, _history_enabled, _history_max_messages, _history_expiry_minutes
+    if not os.path.exists(DATA_FILE):
+        return
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # إحصائيات السشنات
+        for cid_str, users in data.get("session_stats", {}).items():
+            _session_stats[int(cid_str)] = {int(uid): u for uid, u in users.items()}
+        # المجموعات والمشرفون
+        _allowed_chat_ids.update(int(x) for x in data.get("allowed_chat_ids", []))
+        _bot_admins.update(int(x) for x in data.get("bot_admins", []))
+        _allowed_group_owner_usernames.update(data.get("allowed_group_owner_usernames", []))
+        _owner_known_chats.update(int(x) for x in data.get("owner_known_chats", []))
+        _known_chat_names.update({int(k): v for k, v in data.get("known_chat_names", {}).items()})
+        # إعدادات الذكاء الاصطناعي
+        _ai_enabled_chats.update({int(k): v for k, v in data.get("ai_enabled_chats", {}).items()})
+        _ai_daily_limit.update({int(k): v for k, v in data.get("ai_daily_limit", {}).items()})
+        _ai_daily_usage.update({int(k): v for k, v in data.get("ai_daily_usage", {}).items()})
+        # إعدادات عامة
+        _max_sessions = data.get("max_sessions", _max_sessions)
+        _history_enabled = data.get("history_enabled", _history_enabled)
+        _history_max_messages = data.get("history_max_messages", _history_max_messages)
+        _history_expiry_minutes = data.get("history_expiry_minutes", _history_expiry_minutes)
+        # الردود التلقائية
+        _auto_replies.update({int(k): v for k, v in data.get("auto_replies", {}).items()})
+        # مفاتيح Gemini — أضف المحفوظة التي ليست في القائمة الحالية
+        for key in data.get("gemini_api_keys", []):
+            if key and key not in _gemini_api_keys:
+                _gemini_api_keys.append(key)
+        logger.info("✅ تم تحميل البيانات المحفوظة بنجاح.")
+    except Exception as e:
+        logger.warning(f"⚠️ فشل تحميل البيانات: {e}")
 
 # {user_id} — المستخدمين اللي استخدموا فرصة المسامحة مرة واحدة
 _forgiven_users: set = set()
@@ -1370,6 +1442,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         cid = int(data.split(":")[1])
         _allowed_chat_ids.discard(cid)
         _known_chat_names.pop(cid, None)
+        save_data()
         await query.answer("🗑 تم حذف المجموعة.")
         lines = ["🏘 *المجموعات المسموحة*\n", "✅ _مجموعاتك تعمل تلقائياً_\n"]
         rows = []
@@ -1464,6 +1537,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         cid = int(data.split(":")[1])
         current = _ai_enabled_chats.get(cid, True)
         _ai_enabled_chats[cid] = not current
+        save_data()
         state_ar = "مفعّل ✅" if not current else "موقف ❌"
         await query.answer(f"✅ الذكاء أصبح {state_ar}")
         enabled = _ai_enabled_chats[cid]
@@ -1549,6 +1623,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
     if data == "settings_hist_tog":
         _history_enabled = not _history_enabled
+        save_data()
         await query.answer("✅ تم التفعيل" if _history_enabled else "❌ تم الإيقاف")
         # أعد عرض الصفحة
         tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
@@ -1588,6 +1663,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
     if data.startswith("settings_hist_n:"):
         _history_max_messages = int(data.split(":")[1])
+        save_data()
         await query.answer(f"✅ تم الضبط: {_history_max_messages} رسالة")
         tog_lbl = "✅ مفعّل — اضغط لإيقافه" if _history_enabled else "❌ موقوف — اضغط لتفعيله"
         rows = [
@@ -1696,6 +1772,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
     if data.startswith("settings_sess_max:"):
         _max_sessions = int(data.split(":")[1])
+        save_data()
         await query.answer(f"✅ الحد الأقصى صار {_max_sessions}")
         active = sum(len(v) for v in _sessions.values())
         rows = [
@@ -1750,6 +1827,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         idx = int(data.split(":")[1])
         if 0 <= idx < len(_gemini_api_keys):
             _gemini_api_keys.pop(idx)
+            save_data()
             new_exhausted = set()
             for ei in _exhausted_key_indices:
                 if ei < idx:
@@ -2722,6 +2800,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         stats[user.id]["username"] = user.username or ""
         stats[user.id]["sessions"] += 1
         stats[user.id]["study_minutes"] += study_min
+        save_data()
         await query.answer("✅ تم تسجيل حضورك في الإحصائيات!", show_alert=True)
         return
 
@@ -3621,6 +3700,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if clean.lstrip("-").isdigit():
                 new_id = int(clean)
                 _bot_admins.add(new_id)
+                save_data()
                 await update.message.reply_text(
                     f"✅ تم إضافة المشرف `{new_id}` بنجاح.",
                     parse_mode="Markdown",
@@ -3634,6 +3714,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if val.lstrip("-").isdigit():
                 cid = int(val)
                 _allowed_chat_ids.add(cid)
+                save_data()
                 await update.message.reply_text(
                     f"✅ تم إضافة المجموعة `{cid}` للقائمة المسموحة.",
                     parse_mode="Markdown",
@@ -3641,6 +3722,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif val.startswith("@"):
                 uname = val[1:].lower()
                 _allowed_group_owner_usernames.add(uname)
+                save_data()
                 await update.message.reply_text(
                     f"✅ تم إضافة @{uname} كمالك مجموعة مسموحة.\n"
                     "_جميع مجموعاته ستعمل مع البوت._",
@@ -3658,6 +3740,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if val.isdigit():
                 limit = int(val)
                 _ai_daily_limit[cid] = limit
+                save_data()
                 name = _known_chat_names.get(cid, str(cid))
                 if limit == 0:
                     msg = f"✅ تم إلغاء الحد اليومي للذكاء في مجموعة *{name}*."
@@ -3722,6 +3805,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key not in _gemini_api_keys:
                 _gemini_api_keys.append(key)
                 added += 1
+        save_data()
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🔑 عرض المفاتيح", callback_data="settings_api_keys"),
         ]])
@@ -3805,6 +3889,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _auto_replies[chat_id_target] = {}
             _auto_replies[chat_id_target][keyword.lower()] = reply_val
             del _pending_auto_reply[user_id]
+            save_data()
             await update.message.reply_text(
                 f"✅ تم إضافة الرد التلقائي:\n\nالكلمة: «{keyword}»\nالرد: {reply_val}"
             )
@@ -4209,6 +4294,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main():
+    load_data()
+
     errors = []
     if not BOT_TOKEN:
         errors.append("TELEGRAM_BOT_TOKEN")
@@ -4220,10 +4307,17 @@ def main():
         logger.error("⛔ البوت لن يعمل. أضف المتغيرات الناقصة وأعد التشغيل.")
         return
 
+    async def _periodic_save():
+        """يحفظ البيانات تلقائياً كل 5 دقائق."""
+        while True:
+            await asyncio.sleep(300)
+            save_data()
+
     async def _post_init(application):
         global _bot_app, _bot_loop
         _bot_app = application
         _bot_loop = asyncio.get_event_loop()
+        asyncio.create_task(_periodic_save())
         # أرسل/حدّث رسالة الحالة عند كل تشغيل لتعكس المفاتيح الحالية
         _schedule_update_status_message()
 
