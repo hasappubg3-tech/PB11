@@ -355,7 +355,7 @@ _history_max_messages: int = 3         # عدد أزواج الرسائل الم
 _history_expiry_minutes: int = 5       # مدة صلاحية الرسائل بالدقائق
 
 # الحد الأقصى للسشنات المتزامنة
-_max_sessions: int = 1
+_max_sessions: int = 3
 
 # ============================================================
 # 📊 نظام حد الرسائل
@@ -487,7 +487,7 @@ BOT_TRIGGER_WORDS = [
 
 def detect_session_request(text: str) -> bool:
     """يكتشف إذا كان الشخص يريد بدء سشن دراسة.
-    الأمر لازم يكون في بداية الرسالة أو يكون الرسالة كلها — وليس وسط جملة."""
+    الأمر لازم يكون الرسالة كلها بالضبط — وليس وسط جملة أو في بداية رسالة أطول."""
     t = text.strip()
     tl = t.lower()
     SESSION_TRIGGERS = [
@@ -498,11 +498,8 @@ def detect_session_request(text: str) -> bool:
     ]
     for trigger in SESSION_TRIGGERS:
         tr = trigger.lower()
-        # الرسالة كلها = الأمر
+        # الرسالة كلها = الأمر فقط — تطابق تام
         if tl == tr:
-            return True
-        # الأمر في بداية الرسالة متبوعاً بمسافة أو سطر جديد
-        if tl.startswith(tr + " ") or tl.startswith(tr + "\n"):
             return True
     return False
 
@@ -2537,7 +2534,14 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
 async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يعرض قائمة اختيار مدة السشن."""
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id if update.effective_user else None
     group_sessions = _sessions.get(chat_id, {})
+    if user_id and _user_has_active_session(chat_id, user_id):
+        await update.message.reply_text(
+            "⚠️ لديك سشن نشط بالفعل في هذه المجموعة.\n"
+            "أنهِ سشنك الحالي أولاً قبل بدء سشن جديد."
+        )
+        return
     if len(group_sessions) >= _max_sessions:
         await update.message.reply_text(
             f"عذراً، يوجد {len(group_sessions)} سشن نشط حالياً في هذه المجموعة 🚫\n"
@@ -2563,6 +2567,14 @@ async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "_(دراسة / استراحة — بالدقائق)_"
     )
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+
+
+def _user_has_active_session(chat_id: int, user_id: int) -> bool:
+    """يتحقق إذا كان المستخدم هو منشئ سشن نشط في هذه المجموعة."""
+    for sess in _sessions.get(chat_id, {}).values():
+        if sess.get("creator_id") == user_id:
+            return True
+    return False
 
 
 def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
@@ -2605,6 +2617,10 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         parts = data.split(":")
         study = int(parts[1])
         break_t = int(parts[2])
+        # فحص: هل للمستخدم سشن نشط بالفعل في هذه المجموعة؟
+        if _user_has_active_session(chat_id, user.id):
+            await query.answer("⚠️ لديك سشن نشط بالفعل، أنهِه أولاً.", show_alert=True)
+            return
         # فحص الحد لهذه المجموعة
         if len(_sessions.get(chat_id, {})) >= _max_sessions:
             await query.answer(f"❌ وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة.", show_alert=True)
@@ -3623,6 +3639,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break_t = val
             chat_id_target = state["chat_id"]
             del _pending_session_config[user_id]
+            if _user_has_active_session(chat_id_target, user_id):
+                await update.message.reply_text(
+                    "⚠️ لديك سشن نشط بالفعل في هذه المجموعة.\n"
+                    "أنهِ سشنك الحالي أولاً قبل بدء سشن جديد."
+                )
+                return
             if len(_sessions.get(chat_id_target, {})) >= _max_sessions:
                 await update.message.reply_text(
                     f"عذراً، وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة 🚫"
