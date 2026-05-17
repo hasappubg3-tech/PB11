@@ -2475,6 +2475,7 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
             except Exception:
                 pass
         session["present_users"] = set()
+        session["present_expires_at"] = datetime.now() + timedelta(minutes=30)
         join_present_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
             [InlineKeyboardButton("✅ انا موجود", callback_data=f"sess_present:{chat_id}:{sess_id}")],
@@ -2524,10 +2525,13 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         ]])
         await bot.send_message(
             chat_id,
-            f"☕ <b>انتهت الاستراحة!</b>\n\n"
-            f"👥 {names}\n\n"
-            f"{mentions}\n\n"
-            f"هل أنتم مستعدون للسشن {next_ord}؟ 💪",
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"☕ <b>انتهت الاستراحة!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚀 الوقت إلچي نرجع نذاكر!\n"
+            f"هل أنتم مستعدون للسشن {next_ord}؟ 💪\n\n"
+            f"👥 <b>المشاركون:</b>\n{names}\n\n"
+            f"{mentions}",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
@@ -2690,6 +2694,16 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         session = (_sessions.get(tgt_chat) or {}).get(tgt_sess)
         if not session:
             await query.answer("❌ انتهى السشن، لم يتم تسجيل حضورك.", show_alert=True)
+            return
+        # فحص انتهاء مهلة الـ 30 دقيقة
+        expires_at = session.get("present_expires_at")
+        if expires_at and datetime.now() > expires_at:
+            await query.answer("⏰ انتهت مهلة تسجيل الحضور (30 دقيقة).", show_alert=True)
+            return
+        # فحص: فقط المشاركون في السشن يقدرون يسجلون حضورهم
+        participant_ids = {p["id"] for p in session.get("participants", [])}
+        if user.id not in participant_ids:
+            await query.answer("❌ فقط المشاركون في السشن يقدرون يسجلون حضورهم.", show_alert=True)
             return
         present_users = session.setdefault("present_users", set())
         if user.id in present_users:
@@ -2954,7 +2968,7 @@ async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not stats:
         await update.message.reply_text("📊 لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة.", parse_mode="HTML")
         return
-    sorted_users = sorted(stats.values(), key=lambda x: x["sessions"], reverse=True)[:10]
+    sorted_users = sorted(stats.values(), key=lambda x: x["study_minutes"], reverse=True)[:10]
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
     lines = ["📊 <b>أفضل 10 مشاركين في السشنات</b>\n"]
     for i, u in enumerate(sorted_users):
@@ -2993,7 +3007,7 @@ async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rem_mins = mins % 60
     time_str = f"{hours} ساعة و{rem_mins} دقيقة" if hours else f"{mins} دقيقة"
     # ترتيب المستخدم بين الأعضاء
-    sorted_ids = sorted(stats, key=lambda uid: stats[uid]["sessions"], reverse=True)
+    sorted_ids = sorted(stats, key=lambda uid: stats[uid]["study_minutes"], reverse=True)
     rank = sorted_ids.index(user.id) + 1 if user.id in sorted_ids else "-"
     name = _html_module.escape(user.first_name)
     await update.message.reply_text(
