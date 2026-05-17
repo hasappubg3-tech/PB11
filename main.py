@@ -2428,7 +2428,8 @@ def build_session_message(chat_id: int, sess_id: int) -> tuple:
         text = (
             f"📚 <b>جلسة الدراسة {ordinal_f} — نشطة!</b>\n\n"
             f"👤 المنظم: {creator}\n"
-            f"⏱ الدراسة: <b>{study}</b> دقيقة | ☕ الاستراحة: <b>{break_t}</b> دقيقة\n"
+            f"⏱ الدراسة: <b>{study}</b> دقيقة\n"
+            f"☕ الاستراحة: <b>{break_t}</b> دقيقة\n"
             f"👥 المشاركون ({count}): {names}\n\n"
             f"🔴 <i>جارٍ الدراسة...</i>\n\n"
             f"{mentions}"
@@ -2711,7 +2712,8 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         active_text = (
             f"📚 <b>جلسة الدراسة {ordinal_f} — نشطة!</b>\n\n"
             f"👤 المنظم: {creator}\n"
-            f"⏱ الدراسة: <b>{study_min}</b> دقيقة | ☕ الاستراحة: <b>{break_min}</b> دقيقة\n"
+            f"⏱ الدراسة: <b>{study_min}</b> دقيقة\n"
+            f"☕ الاستراحة: <b>{break_min}</b> دقيقة\n"
             f"👥 المشاركون ({len(session['participants'])}): {names}\n\n"
             f"🔴 <i>جارٍ الدراسة...</i>\n\n"
             f"{mentions}"
