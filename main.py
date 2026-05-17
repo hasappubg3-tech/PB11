@@ -284,6 +284,8 @@ _session_counters: dict = {}
 _pending_next_session: dict = {}
 # {user_id: {"step": "study"|"break", "chat_id": int, "study": int|None}}
 _pending_session_config: dict = {}
+# إحصائيات السشنات: {chat_id: {user_id: {"name": str, "username": str, "sessions": int, "study_minutes": int}}}
+_session_stats: dict = {}
 
 # أسماء ترتيبية للسشنات — مذكّر (السشن) ومؤنّث (الجلسة)
 _SESSION_ORDINALS_AR = {
@@ -924,6 +926,12 @@ ARABIC_COMMANDS = {
     "الأوامر": "help",
     "اوامر": "help",
     "أوامر": "help",
+    "الاحصائيات": "stats",
+    "الإحصائيات": "stats",
+    "احصائيات": "stats",
+    "إحصائيات": "stats",
+    "احصائياتي": "my_stats",
+    "إحصائياتي": "my_stats",
 }
 
 
@@ -2466,17 +2474,20 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
                 await bot.delete_message(chat_id, old_msg)
             except Exception:
                 pass
-        join_kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}"),
-        ]])
+        session["present_users"] = set()
+        join_present_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✋ انضم للسشن", callback_data=f"sess_join:{chat_id}:{sess_id}")],
+            [InlineKeyboardButton("✅ انا موجود", callback_data=f"sess_present:{chat_id}:{sess_id}")],
+        ])
         study_end_msg = await bot.send_message(
             chat_id,
             f"🎉🎊🥳 <b>أحسنتم! انتهت جلسة الدراسة {_session_ordinal_f(session_num)}!</b>\n\n"
             f"👤 المنظم: {creator}\n"
             f"👥 المشاركون ({len(session['participants'])}): {names}\n\n"
             f"استحقيتوا راحة <b>{break_min}</b> دقيقة ☕\n\n"
-            f"{mentions}",
-            reply_markup=join_kb,
+            f"{mentions}\n\n"
+            f"💡 اضغط <b>انا موجود</b> لتسجيل مشاركتك في الإحصائيات",
+            reply_markup=join_present_kb,
             parse_mode="HTML",
         )
         session["message_id"] = study_end_msg.message_id
@@ -2669,6 +2680,34 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         msg = await context.bot.send_message(tgt_chat, text, reply_markup=keyboard, parse_mode="HTML")
         session["message_id"] = msg.message_id
         await query.answer("✅ انضممت للسشن!")
+        return
+
+    # ── تسجيل الحضور للإحصائيات ──
+    if data.startswith("sess_present:"):
+        parts = data.split(":")
+        tgt_chat = int(parts[1])
+        tgt_sess = int(parts[2])
+        session = (_sessions.get(tgt_chat) or {}).get(tgt_sess)
+        if not session:
+            await query.answer("❌ انتهى السشن، لم يتم تسجيل حضورك.", show_alert=True)
+            return
+        present_users = session.setdefault("present_users", set())
+        if user.id in present_users:
+            await query.answer("✅ تم تسجيل حضورك مسبقاً!", show_alert=True)
+            return
+        present_users.add(user.id)
+        # تسجيل في الإحصائيات
+        study_min = session.get("study", 0)
+        if tgt_chat not in _session_stats:
+            _session_stats[tgt_chat] = {}
+        stats = _session_stats[tgt_chat]
+        if user.id not in stats:
+            stats[user.id] = {"name": user.first_name, "username": user.username or "", "sessions": 0, "study_minutes": 0}
+        stats[user.id]["name"] = user.first_name
+        stats[user.id]["username"] = user.username or ""
+        stats[user.id]["sessions"] += 1
+        stats[user.id]["study_minutes"] += study_min
+        await query.answer("✅ تم تسجيل حضورك في الإحصائيات!", show_alert=True)
         return
 
     # ── بدء السشن — عدّ تنازلي ──
@@ -2904,6 +2943,68 @@ async def do_list_auto_replies(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعرض أفضل 10 مشاركين في السشنات بالمجموعة."""
+    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
+        return
+    stats = _session_stats.get(chat_id, {})
+    if not stats:
+        await update.message.reply_text("📊 لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة.", parse_mode="HTML")
+        return
+    sorted_users = sorted(stats.values(), key=lambda x: x["sessions"], reverse=True)[:10]
+    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+    lines = ["📊 <b>أفضل 10 مشاركين في السشنات</b>\n"]
+    for i, u in enumerate(sorted_users):
+        name = _html_module.escape(u["name"])
+        sessions = u["sessions"]
+        mins = u["study_minutes"]
+        hours = mins // 60
+        rem_mins = mins % 60
+        time_str = f"{hours}س {rem_mins}د" if hours else f"{rem_mins}د"
+        lines.append(f"{medals[i]} {name} — {sessions} جلسة | ⏱ {time_str}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعرض إحصائيات المستخدم الشخصية في هذه المجموعة."""
+    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
+        return
+    if not user:
+        return
+    stats = _session_stats.get(chat_id, {})
+    u = stats.get(user.id)
+    if not u or u["sessions"] == 0:
+        await update.message.reply_text(
+            f"📊 <b>إحصائياتك في هذه المجموعة</b>\n\n"
+            f"لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة.",
+            parse_mode="HTML"
+        )
+        return
+    sessions = u["sessions"]
+    mins = u["study_minutes"]
+    hours = mins // 60
+    rem_mins = mins % 60
+    time_str = f"{hours} ساعة و{rem_mins} دقيقة" if hours else f"{mins} دقيقة"
+    # ترتيب المستخدم بين الأعضاء
+    sorted_ids = sorted(stats, key=lambda uid: stats[uid]["sessions"], reverse=True)
+    rank = sorted_ids.index(user.id) + 1 if user.id in sorted_ids else "-"
+    name = _html_module.escape(user.first_name)
+    await update.message.reply_text(
+        f"📊 <b>إحصائيات {name}</b>\n\n"
+        f"📚 جلسات الدراسة: <b>{sessions}</b>\n"
+        f"⏱ إجمالي وقت الدراسة: <b>{time_str}</b>\n"
+        f"🏆 ترتيبك في المجموعة: <b>#{rank}</b>",
+        parse_mode="HTML"
+    )
+
+
 COMMAND_HANDLERS = {
     "ban": do_ban,
     "unban": do_unban,
@@ -2925,6 +3026,8 @@ COMMAND_HANDLERS = {
     "help": show_help,
     "rate_limit": do_rate_limit,
     "cancel_rate_limit": do_cancel_rate_limit,
+    "stats": show_group_stats,
+    "my_stats": show_my_stats,
 }
 
 
