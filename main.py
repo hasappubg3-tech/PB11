@@ -3653,17 +3653,16 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not reply:
         if ai_error is not None:
-            await update.message.reply_text(
-                "⚠️ عذراً، حدث خطأ مؤقت في الذكاء الاصطناعي. حاول مرة ثانية بعد لحظة."
-            )
-            # تنبيه للمالك بالخطأ الحقيقي
+            # إرسال تفاصيل الخطأ للمالك فقط دون الرد على الأعضاء
             if _bot_app and OWNER_CHAT_ID:
                 try:
                     short_err = ai_error[:300]
+                    chat_info = f"المجموعة: {update.message.chat.title or 'خاص'} (ID: {update.message.chat_id})"
+                    user_info = f"المستخدم: {update.message.from_user.full_name} (ID: {user_id})"
                     asyncio.create_task(
                         _bot_app.bot.send_message(
                             OWNER_CHAT_ID,
-                            f"🚨 <b>خطأ في الذكاء الاصطناعي</b>\n<code>{short_err}</code>",
+                            f"🚨 <b>خطأ في الذكاء الاصطناعي</b>\n{chat_info}\n{user_info}\n\n<code>{short_err}</code>",
                             parse_mode="HTML",
                         )
                     )
