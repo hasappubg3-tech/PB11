@@ -3635,7 +3635,7 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_error = None
         try:
             response = generate_with_rotation(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=GEMINI_SYSTEM_PROMPT,
