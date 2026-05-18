@@ -2813,6 +2813,10 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("❌ السشن انتهى أو لم يعد موجوداً.", show_alert=True)
             return
         session = _sessions[tgt_chat][tgt_sess]
+        # فحص: صاحب السشن فقط يقدر يبدأه
+        if user.id != session.get("creator_id"):
+            await query.answer("❌ فقط منظم السشن يقدر يبدأه.", show_alert=True)
+            return
         # منع بدء مزدوج
         existing_task = session.get("task")
         if existing_task and not existing_task.done():
@@ -2866,10 +2870,15 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         parts = data.split(":")
         orig_chat = int(parts[1])
         orig_sess = int(parts[2])
-        pending = _pending_next_session.pop((orig_chat, orig_sess), None)
+        pending = _pending_next_session.get((orig_chat, orig_sess))
         if not pending:
             await query.answer("❌ انتهت صلاحية هذا الزر.", show_alert=True)
             return
+        # فحص: صاحب السشن فقط يقدر يبدأ السشن التالي
+        if user.id != pending.get("creator_id"):
+            await query.answer("❌ فقط منظم السشن يقدر يبدأ السشن التالي.", show_alert=True)
+            return
+        _pending_next_session.pop((orig_chat, orig_sess), None)
         if len(_sessions.get(orig_chat, {})) >= _max_sessions:
             await query.answer(f"❌ وصلنا للحد الأقصى ({_max_sessions} سشن) في هذه المجموعة.", show_alert=True)
             return
