@@ -2828,6 +2828,10 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         stats[user.id]["username"] = user.username or ""
         stats[user.id]["sessions"] += 1
         stats[user.id]["study_minutes"] += study_min
+        # سجل يومي للفلترة الزمنية
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        log_entry = {"date": today_str, "study_minutes": study_min}
+        stats[user.id].setdefault("log", []).append(log_entry)
         save_data()
         await query.answer("✅ تم تسجيل حضورك في الإحصائيات!", show_alert=True)
         return
@@ -3082,21 +3086,110 @@ async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
         return
     stats = _session_stats.get(chat_id, {})
+    text = _build_stats_text(stats, "all")
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📅 اليوم", callback_data=f"statsperiod:{chat_id}:today"),
+            InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
+            InlineKeyboardButton("🗓 آخر شهر", callback_data=f"statsperiod:{chat_id}:month"),
+        ]
+    ])
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+def _build_stats_text(stats: dict, period: str) -> str:
+    """يبني نص الإحصائيات حسب الفترة: all / today / week / month."""
     if not stats:
-        await update.message.reply_text("📊 لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة.", parse_mode="HTML")
-        return
-    sorted_users = sorted(stats.values(), key=lambda x: x["study_minutes"], reverse=True)[:10]
+        return "📊 لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة."
+
+    period_labels = {
+        "all":   "📊 <b>إحصائيات كل الوقت — أفضل 10</b>",
+        "today": "📅 <b>إحصائيات اليوم — أفضل 10</b>",
+        "week":  "📆 <b>إحصائيات آخر أسبوع — أفضل 10</b>",
+        "month": "🗓 <b>إحصائيات آخر شهر — أفضل 10</b>",
+    }
+
+    now = datetime.now()
+    if period == "today":
+        cutoff = now.strftime("%Y-%m-%d")
+    elif period == "week":
+        cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+    elif period == "month":
+        cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    else:
+        cutoff = None
+
+    rows = []
+    for uid, u in stats.items():
+        if cutoff is None:
+            # كل الوقت — استخدم القيم الإجمالية
+            sessions = u.get("sessions", 0)
+            mins = u.get("study_minutes", 0)
+        else:
+            # فلتر حسب التاريخ من السجل
+            log = u.get("log", [])
+            if period == "today":
+                filtered = [e for e in log if e.get("date", "") == cutoff]
+            else:
+                filtered = [e for e in log if e.get("date", "") >= cutoff]
+            sessions = len(filtered)
+            mins = sum(e.get("study_minutes", 0) for e in filtered)
+
+        if sessions == 0 and mins == 0:
+            continue
+        rows.append({"name": u.get("name", "؟"), "sessions": sessions, "study_minutes": mins})
+
+    if not rows:
+        return f"{period_labels.get(period, '')}\n\n⚠️ لا توجد إحصائيات لهذه الفترة."
+
+    rows.sort(key=lambda x: x["study_minutes"], reverse=True)
+    rows = rows[:10]
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
-    lines = ["📊 <b>أفضل 10 مشاركين في السشنات</b>\n"]
-    for i, u in enumerate(sorted_users):
-        name = _html_module.escape(u["name"])
-        sessions = u["sessions"]
-        mins = u["study_minutes"]
+    lines = [period_labels.get(period, "📊"), ""]
+    for i, row in enumerate(rows):
+        name = _html_module.escape(row["name"])
+        mins = row["study_minutes"]
         hours = mins // 60
-        rem_mins = mins % 60
-        time_str = f"{hours}س {rem_mins}د" if hours else f"{rem_mins}د"
-        lines.append(f"{medals[i]} {name} — {sessions} جلسة | ⏱ {time_str}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        rem = mins % 60
+        time_str = f"{hours}س {rem}د" if hours else f"{rem}د"
+        lines.append(f"{medals[i]} {name} — {row['sessions']} جلسة | ⏱ {time_str}")
+    return "\n".join(lines)
+
+
+async def handle_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعالج أزرار فترات الإحصائيات."""
+    query = update.callback_query
+    data = query.data  # statsperiod:{chat_id}:{period}
+    parts = data.split(":")
+    if len(parts) != 3:
+        await query.answer()
+        return
+
+    chat_id = int(parts[1])
+    period = parts[2]  # today / week / month / back
+
+    stats = _session_stats.get(chat_id, {})
+
+    if period == "back":
+        text = _build_stats_text(stats, "all")
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📅 اليوم", callback_data=f"statsperiod:{chat_id}:today"),
+                InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
+                InlineKeyboardButton("🗓 آخر شهر", callback_data=f"statsperiod:{chat_id}:month"),
+            ]
+        ])
+    else:
+        text = _build_stats_text(stats, period)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")]
+        ])
+
+    await query.answer()
+    try:
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        pass
 
 
 async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4368,6 +4461,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_settings_callback, pattern=r"^settings_"))
     app.add_handler(CallbackQueryHandler(handle_focus_callback, pattern=r"^focus_"))
     app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
+    app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^statsperiod:"))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_error_handler(error_handler)
