@@ -1,6 +1,7 @@
 import os
 import json
 import html as _html_module
+from pymongo import MongoClient
 import logging
 import random
 import asyncio
@@ -413,15 +414,40 @@ IGNORE_DURATION_HOURS = 1
 WARNING_EXPIRY_MINUTES = 30
 
 # ============================================================
-# 💾 نظام حفظ البيانات
+# 💾 نظام حفظ البيانات — MongoDB Atlas
 # ============================================================
-DATA_FILE = "bot_data.json"
+_mongo_client = None
+_mongo_col = None
+
+
+def _get_mongo_col():
+    """يُعيد مجموعة MongoDB ويُنشئ الاتصال عند الحاجة."""
+    global _mongo_client, _mongo_col
+    if _mongo_col is not None:
+        return _mongo_col
+    uri = os.environ.get("MONGODB_URI", "")
+    if not uri:
+        logger.warning("⚠️ MONGODB_URI غير موجود — سيتم تخطي الحفظ.")
+        return None
+    try:
+        _mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        db = _mongo_client["amira_bot"]
+        _mongo_col = db["bot_data"]
+        logger.info("✅ تم الاتصال بـ MongoDB Atlas.")
+    except Exception as e:
+        logger.warning(f"⚠️ فشل الاتصال بـ MongoDB: {e}")
+        _mongo_col = None
+    return _mongo_col
 
 
 def save_data():
-    """يحفظ كل الإعدادات والإحصائيات في ملف JSON."""
+    """يحفظ كل الإعدادات والإحصائيات في MongoDB."""
+    col = _get_mongo_col()
+    if col is None:
+        return
     try:
         data = {
+            "_id": "bot_data",
             "session_stats": {
                 str(cid): {str(uid): u for uid, u in users.items()}
                 for cid, users in _session_stats.items()
@@ -441,20 +467,22 @@ def save_data():
             "history_expiry_minutes": _history_expiry_minutes,
             "gemini_api_keys": list(_gemini_api_keys),
         }
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        col.replace_one({"_id": "bot_data"}, data, upsert=True)
     except Exception as e:
-        logger.warning(f"⚠️ فشل حفظ البيانات: {e}")
+        logger.warning(f"⚠️ فشل حفظ البيانات في MongoDB: {e}")
 
 
 def load_data():
-    """يحمّل الإعدادات والإحصائيات من ملف JSON عند بدء التشغيل."""
+    """يحمّل الإعدادات والإحصائيات من MongoDB عند بدء التشغيل."""
     global _max_sessions, _history_enabled, _history_max_messages, _history_expiry_minutes
-    if not os.path.exists(DATA_FILE):
+    col = _get_mongo_col()
+    if col is None:
         return
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = col.find_one({"_id": "bot_data"})
+        if not data:
+            logger.info("ℹ️ لا توجد بيانات محفوظة في MongoDB بعد.")
+            return
         # إحصائيات السشنات
         for cid_str, users in data.get("session_stats", {}).items():
             _session_stats[int(cid_str)] = {int(uid): u for uid, u in users.items()}
@@ -475,13 +503,13 @@ def load_data():
         _history_expiry_minutes = data.get("history_expiry_minutes", _history_expiry_minutes)
         # الردود التلقائية
         _auto_replies.update({int(k): v for k, v in data.get("auto_replies", {}).items()})
-        # مفاتيح Gemini — أضف المحفوظة التي ليست في القائمة الحالية
+        # مفاتيح Gemini
         for key in data.get("gemini_api_keys", []):
             if key and key not in _gemini_api_keys:
                 _gemini_api_keys.append(key)
-        logger.info("✅ تم تحميل البيانات المحفوظة بنجاح.")
+        logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
-        logger.warning(f"⚠️ فشل تحميل البيانات: {e}")
+        logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
 
 # {user_id} — المستخدمين اللي استخدموا فرصة المسامحة مرة واحدة
 _forgiven_users: set = set()
