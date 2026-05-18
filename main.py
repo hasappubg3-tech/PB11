@@ -3632,9 +3632,10 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not reply:
         contents = _build_contents_with_history(user_id, user_message)
+        ai_error = None
         try:
             response = generate_with_rotation(
-                model="gemini-2.5-flash",
+                model="gemini-2.5-flash-preview-04-17",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=GEMINI_SYSTEM_PROMPT,
@@ -3645,10 +3646,29 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not reply:
                 raise ValueError("رد فارغ من الذكاء الاصطناعي")
         except Exception as e:
-            logger.warning(f"Gemini فشل: {e}")
+            err_str = str(e)
+            logger.error(f"Gemini فشل [{type(e).__name__}]: {err_str}")
+            ai_error = err_str
             reply = None
 
     if not reply:
+        if ai_error is not None:
+            await update.message.reply_text(
+                "⚠️ عذراً، حدث خطأ مؤقت في الذكاء الاصطناعي. حاول مرة ثانية بعد لحظة."
+            )
+            # تنبيه للمالك بالخطأ الحقيقي
+            if _bot_app and OWNER_CHAT_ID:
+                try:
+                    short_err = ai_error[:300]
+                    asyncio.create_task(
+                        _bot_app.bot.send_message(
+                            OWNER_CHAT_ID,
+                            f"🚨 <b>خطأ في الذكاء الاصطناعي</b>\n<code>{short_err}</code>",
+                            parse_mode="HTML",
+                        )
+                    )
+                except Exception:
+                    pass
         return
 
     if "##RUDE##" in reply:
