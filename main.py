@@ -163,17 +163,34 @@ _QUOTA_KEYWORDS = (
     "quota exceeded",
 )
 
+_INVALID_KEY_KEYWORDS = (
+    "api key expired",
+    "api_key_invalid",
+    "api key invalid",
+    "invalid_argument",
+    "key expired",
+    "renew the api key",
+    "invalid api key",
+    "api key not valid",
+    "api_key_expired",
+)
+
 
 def _is_quota_error(e: Exception) -> bool:
     """يتحقق إذا الخطأ ناتج عن استنفاد الحصة أو تجاوز الحد."""
     error_str = str(e).lower()
     if any(kw in error_str for kw in _QUOTA_KEYWORDS):
         return True
-    # تحقق من اسم نوع الاستثناء كذلك
     exc_type = type(e).__name__.lower()
     if any(kw in exc_type for kw in ("quota", "ratelimit", "resourceexhausted", "toomanyrequests")):
         return True
     return False
+
+
+def _is_invalid_key_error(e: Exception) -> bool:
+    """يتحقق إذا الخطأ ناتج عن مفتاح منتهي الصلاحية أو غير صالح."""
+    error_str = str(e).lower()
+    return any(kw in error_str for kw in _INVALID_KEY_KEYWORDS)
 
 
 def generate_with_rotation(model, contents, config):
@@ -204,6 +221,12 @@ def generate_with_rotation(model, contents, config):
                 )
                 _exhausted_key_indices.add(i)
                 _schedule_update_status_message()
+            elif _is_invalid_key_error(e):
+                logger.warning(
+                    f"مفتاح Gemini رقم {i + 1} منتهي الصلاحية أو غير صالح، جاري البحث عن مفتاح آخر..."
+                )
+                _exhausted_key_indices.add(i)
+                _schedule_update_status_message()
             else:
                 logger.error(f"خطأ غير متوقع من مفتاح رقم {i + 1} [{type(e).__name__}]: {e}")
                 raise
@@ -222,7 +245,7 @@ def generate_with_rotation(model, contents, config):
             gemini_client = client
             return result
         except Exception as e:
-            if _is_quota_error(e):
+            if _is_quota_error(e) or _is_invalid_key_error(e):
                 last_exception = e
             else:
                 logger.error(f"خطأ غير متوقع من مفتاح رقم {i + 1} [{type(e).__name__}]: {e}")
@@ -230,7 +253,7 @@ def generate_with_rotation(model, contents, config):
 
     if last_exception:
         raise last_exception
-    raise Exception("كل مفاتيح Gemini مستنفدة")
+    raise Exception("كل مفاتيح Gemini مستنفدة أو منتهية الصلاحية")
 
 # البرومبت اللي يحدد شخصية البوت — تقدر تعدله
 GEMINI_SYSTEM_PROMPT = (
