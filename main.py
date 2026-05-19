@@ -418,6 +418,7 @@ WARNING_EXPIRY_MINUTES = 30
 # ============================================================
 _mongo_client = None
 _mongo_col = None
+_sessions_col = None
 
 
 def _get_mongo_col():
@@ -438,6 +439,23 @@ def _get_mongo_col():
         logger.warning(f"⚠️ فشل الاتصال بـ MongoDB: {e}")
         _mongo_col = None
     return _mongo_col
+
+
+def _get_sessions_col():
+    """يُعيد مجموعة active_sessions من MongoDB."""
+    global _sessions_col, _mongo_client
+    if _sessions_col is not None:
+        return _sessions_col
+    _get_mongo_col()
+    if _mongo_client is None:
+        return None
+    try:
+        db = _mongo_client["amira_bot"]
+        _sessions_col = db["active_sessions"]
+    except Exception as e:
+        logger.warning(f"⚠️ فشل الحصول على مجموعة active_sessions: {e}")
+        _sessions_col = None
+    return _sessions_col
 
 
 def save_data():
@@ -510,6 +528,129 @@ def load_data():
         logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
         logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
+
+
+# ─── حفظ/حذف السشنات النشطة في MongoDB ───────────────────────────────────────
+
+def _db_save_session(chat_id: int, sess_id: int):
+    """يحفظ سشناً واحداً في MongoDB."""
+    col = _get_sessions_col()
+    if col is None:
+        return
+    session = (_sessions.get(chat_id) or {}).get(sess_id)
+    if not session:
+        return
+    try:
+        participants_data = []
+        for p in session.get("participants", []):
+            pdata = dict(p)
+            if isinstance(pdata.get("joined_at"), datetime):
+                pdata["joined_at"] = pdata["joined_at"].isoformat()
+            participants_data.append(pdata)
+        started_at = session.get("started_at")
+        if isinstance(started_at, datetime):
+            started_at = started_at.isoformat()
+        doc = {
+            "_id": f"{chat_id}:{sess_id}",
+            "chat_id": chat_id,
+            "sess_id": sess_id,
+            "study": session["study"],
+            "break": session["break"],
+            "participants": participants_data,
+            "creator_name": session.get("creator_name", ""),
+            "creator_id": session.get("creator_id"),
+            "message_id": session.get("message_id"),
+            "session_num": session.get("session_num", 1),
+            "phase": session.get("phase", "waiting"),
+            "started_at": started_at,
+        }
+        col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+    except Exception as e:
+        logger.warning(f"⚠️ فشل حفظ السشن في MongoDB: {e}")
+
+
+def _db_delete_session(chat_id: int, sess_id: int):
+    """يحذف سشناً واحداً من MongoDB."""
+    col = _get_sessions_col()
+    if col is None:
+        return
+    try:
+        col.delete_one({"_id": f"{chat_id}:{sess_id}"})
+    except Exception as e:
+        logger.warning(f"⚠️ فشل حذف السشن من MongoDB: {e}")
+
+
+def _db_clear_group_sessions(chat_id: int):
+    """يحذف جميع سشنات مجموعة من MongoDB."""
+    col = _get_sessions_col()
+    if col is None:
+        return
+    try:
+        col.delete_many({"chat_id": chat_id})
+    except Exception as e:
+        logger.warning(f"⚠️ فشل مسح سشنات المجموعة من MongoDB: {e}")
+
+
+async def _restore_sessions_from_db(bot):
+    """يستعيد السشنات النشطة من MongoDB عند إعادة تشغيل البوت."""
+    col = _get_sessions_col()
+    if col is None:
+        return
+    try:
+        docs = list(col.find({}))
+        if not docs:
+            return
+        restored = 0
+        for doc in docs:
+            chat_id = doc["chat_id"]
+            sess_id = doc["sess_id"]
+            # إعادة بناء المشاركين
+            participants = []
+            for p in doc.get("participants", []):
+                pdata = dict(p)
+                if pdata.get("joined_at"):
+                    try:
+                        pdata["joined_at"] = datetime.fromisoformat(pdata["joined_at"])
+                    except Exception:
+                        pdata["joined_at"] = None
+                participants.append(pdata)
+            # تحويل started_at
+            started_at = None
+            if doc.get("started_at"):
+                try:
+                    started_at = datetime.fromisoformat(doc["started_at"])
+                except Exception:
+                    pass
+            # بناء السشن في الذاكرة
+            if chat_id not in _sessions:
+                _sessions[chat_id] = {}
+            _sessions[chat_id][sess_id] = {
+                "study": doc["study"],
+                "break": doc["break"],
+                "participants": participants,
+                "creator_name": doc.get("creator_name", ""),
+                "creator_id": doc.get("creator_id"),
+                "message_id": doc.get("message_id"),
+                "session_num": doc.get("session_num", 1),
+                "phase": doc.get("phase", "waiting"),
+                "started_at": started_at,
+                "task": None,
+                "sess_id": sess_id,
+            }
+            if sess_id > _session_counters.get(chat_id, 0):
+                _session_counters[chat_id] = sess_id
+            # إذا كان السشن في مرحلة الدراسة، أعد تشغيل المؤقت بالوقت المتبقي
+            if doc.get("phase") == "studying" and started_at:
+                elapsed = int((datetime.now() - started_at).total_seconds())
+                task = asyncio.create_task(
+                    run_session_timer(chat_id, sess_id, bot, elapsed_seconds=elapsed)
+                )
+                _sessions[chat_id][sess_id]["task"] = task
+            restored += 1
+        logger.info(f"✅ تم استعادة {restored} سشن نشط من MongoDB.")
+    except Exception as e:
+        logger.warning(f"⚠️ فشل استعادة السشنات من MongoDB: {e}")
+
 
 # {user_id} — المستخدمين اللي استخدموا فرصة المسامحة مرة واحدة
 _forgiven_users: set = set()
@@ -2561,7 +2702,7 @@ def build_session_message(chat_id: int, sess_id: int) -> tuple:
     return text, InlineKeyboardMarkup(rows)
 
 
-async def run_session_timer(chat_id: int, sess_id: int, bot):
+async def run_session_timer(chat_id: int, sess_id: int, bot, elapsed_seconds: int = 0):
     """مؤقت السشن: ينبّه عند انتهاء الدراسة ثم الاستراحة."""
     try:
         if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
@@ -2571,8 +2712,8 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         break_min = session["break"]
         session_num = session.get("session_num", 1)
 
-        # ── انتظار وقت الدراسة ──
-        await asyncio.sleep(study_min * 60)
+        # ── انتظار وقت الدراسة (مع مراعاة الوقت المنقضي عند الاستعادة) ──
+        await asyncio.sleep(max(0, study_min * 60 - elapsed_seconds))
         if chat_id not in _sessions or sess_id not in _sessions[chat_id]:
             return
         session = _sessions[chat_id][sess_id]
@@ -2651,6 +2792,7 @@ async def run_session_timer(chat_id: int, sess_id: int, bot):
         )
 
         # حذف السشن القديم
+        _db_delete_session(chat_id, sess_id)
         _sessions[chat_id].pop(sess_id, None)
         if not _sessions.get(chat_id):
             _sessions.pop(chat_id, None)
@@ -2736,6 +2878,7 @@ def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
         "phase": "waiting",
         "started_at": None,
     }
+    _db_save_session(chat_id, sess_id)
     return sess_id
 
 
@@ -2807,6 +2950,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         text, keyboard = build_session_message(tgt_chat, tgt_sess)
         msg = await context.bot.send_message(tgt_chat, text, reply_markup=keyboard, parse_mode="HTML")
         session["message_id"] = msg.message_id
+        _db_save_session(tgt_chat, tgt_sess)
         await query.answer("✅ انضممت للسشن!")
         return
 
@@ -2929,6 +3073,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         # بدء التايمر
         task = asyncio.create_task(run_session_timer(tgt_chat, tgt_sess, context.bot))
         _sessions[tgt_chat][tgt_sess]["task"] = task
+        _db_save_session(tgt_chat, tgt_sess)
         return
 
     # ── بدء السشن القادم ──
@@ -2986,6 +3131,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
             task.cancel()
         _pending_next_session.pop((tgt_chat, tgt_sess), None)
         ordinal = _session_ordinal(session.get("session_num", 1))
+        _db_delete_session(tgt_chat, tgt_sess)
         _sessions[tgt_chat].pop(tgt_sess, None)
         if not _sessions.get(tgt_chat):
             _sessions.pop(tgt_chat, None)
@@ -3025,6 +3171,7 @@ async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📌 السشن {ordinal}: {session['study']}د دراسة / {session['break']}د استراحة — "
             f"👥 {count} مشارك ({names})"
         )
+    _db_clear_group_sessions(chat_id)
     _sessions.pop(chat_id, None)
     summary = "\n".join(lines)
     await update.message.reply_text(
@@ -3123,6 +3270,7 @@ async def do_leave_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     # إزالة العضو من قائمة المشاركين
     session["participants"] = [p for p in session["participants"] if p["id"] != user_id]
+    _db_save_session(chat_id, found_sess_id)
     ordinal = _session_ordinal(session.get("session_num", 1))
     await update.message.reply_text(
         f"✅ {_html_module.escape(user.first_name)} انسحب من السشن {ordinal}.",
@@ -4713,6 +4861,7 @@ def main():
         _bot_app = application
         _bot_loop = asyncio.get_event_loop()
         asyncio.create_task(_periodic_save())
+        await _restore_sessions_from_db(application.bot)
         # أرسل/حدّث رسالة الحالة عند كل تشغيل لتعكس المفاتيح الحالية
         _schedule_update_status_message()
 
