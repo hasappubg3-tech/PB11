@@ -3304,11 +3304,7 @@ def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
     buttons = []
     for i, row in enumerate(rows):
-        mins = row["study_minutes"]
-        hours = mins // 60
-        rem = mins % 60
-        time_str = f"{hours}س {rem}د" if hours else f"{rem}د"
-        btn_label = f"{medals[i]} {row['name']}  ·  {row['sessions']} جلسة  ·  {time_str}"
+        btn_label = f"{medals[i]}  {row['name']}"
         buttons.append([
             InlineKeyboardButton(btn_label, callback_data=f"statsuser:{chat_id}:{row['uid']}:{period}")
         ])
@@ -3321,14 +3317,12 @@ def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
 def _build_period_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     """يبني لوحة اختيار الفترة الزمنية."""
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 الإحصائيات الكلية", callback_data=f"statsperiod:{chat_id}:all")],
         [
-            InlineKeyboardButton("📊 الإحصائيات الكلية", callback_data=f"statsperiod:{chat_id}:all"),
-            InlineKeyboardButton("📅 آخر يوم",            callback_data=f"statsperiod:{chat_id}:today"),
+            InlineKeyboardButton("📅 آخر يوم",   callback_data=f"statsperiod:{chat_id}:today"),
+            InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
         ],
-        [
-            InlineKeyboardButton("📆 آخر أسبوع",          callback_data=f"statsperiod:{chat_id}:week"),
-            InlineKeyboardButton("🗓 آخر شهر",             callback_data=f"statsperiod:{chat_id}:month"),
-        ],
+        [InlineKeyboardButton("🗓 آخر شهر",      callback_data=f"statsperiod:{chat_id}:month")],
     ])
 
 
