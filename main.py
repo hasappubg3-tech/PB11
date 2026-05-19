@@ -3301,10 +3301,11 @@ def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
         ])
         return text, keyboard
 
-    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+    medals = ["🥇", "🥈", "🥉"]
     buttons = []
     for i, row in enumerate(rows):
-        btn_label = f"{medals[i]}  {row['name']}"
+        prefix = medals[i] if i < 3 else f"{i + 1}."
+        btn_label = f"{prefix}  {row['name']}"
         buttons.append([
             InlineKeyboardButton(btn_label, callback_data=f"statsuser:{chat_id}:{row['uid']}:{period}")
         ])
