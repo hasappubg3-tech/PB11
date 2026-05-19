@@ -1016,6 +1016,13 @@ ARABIC_COMMANDS = {
     "الغاء السشن": "end_session",
     "إلغاء السشن": "end_session",
     "وقف السشن": "end_session",
+    "الانسحاب": "leave_session",
+    "انسحاب": "leave_session",
+    "الانسحاب من السشن": "leave_session",
+    "انسحاب من السشن": "leave_session",
+    "السشنات": "active_sessions",
+    "السشنات النشطة": "active_sessions",
+    "السشنات النشطه": "active_sessions",
     "الغاء منع التسخيت": "stop_focus",
     "إلغاء منع التسخيت": "stop_focus",
     "ايقاف منع التسخيت": "stop_focus",
@@ -2693,9 +2700,11 @@ async def show_session_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 def _user_has_active_session(chat_id: int, user_id: int) -> bool:
-    """يتحقق إذا كان المستخدم هو منشئ سشن نشط في هذه المجموعة."""
+    """يتحقق إذا كان المستخدم منشئاً أو مشاركاً في أي سشن نشط في هذه المجموعة."""
     for sess in _sessions.get(chat_id, {}).values():
         if sess.get("creator_id") == user_id:
+            return True
+        if any(p["id"] == user_id for p in sess.get("participants", [])):
             return True
     return False
 
@@ -2708,11 +2717,12 @@ def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
     sess_id = _session_counters[chat_id]
     if chat_id not in _sessions:
         _sessions[chat_id] = {}
-    participants = [{"id": creator_id, "name": creator_name, "username": creator_username}]
+    now = datetime.now()
+    participants = [{"id": creator_id, "name": creator_name, "username": creator_username, "joined_at": None}]
     if extra_participants:
         for p in extra_participants:
             if p["id"] != creator_id:
-                participants.append(p)
+                participants.append({"id": p["id"], "name": p["name"], "username": p.get("username", ""), "joined_at": None})
     _sessions[chat_id][sess_id] = {
         "study": study,
         "break": break_t,
@@ -2724,6 +2734,7 @@ def _create_session(chat_id: int, study: int, break_t: int, creator_id: int,
         "sess_id": sess_id,
         "session_num": session_num,
         "phase": "waiting",
+        "started_at": None,
     }
     return sess_id
 
@@ -2782,7 +2793,13 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         if any(p["id"] == user.id for p in session["participants"]):
             await query.answer("✅ أنت مشارك بالفعل!", show_alert=True)
             return
-        session["participants"].append({"id": user.id, "name": user.first_name, "username": user.username or ""})
+        # منع الانضمام لأكثر من سشن في نفس الوقت
+        if _user_has_active_session(tgt_chat, user.id):
+            await query.answer("⚠️ أنت مشارك بالفعل في سشن آخر في هذه المجموعة. اغادر سشنك الحالي أولاً.", show_alert=True)
+            return
+        # تسجيل وقت الانضمام (None إذا لم يبدأ السشن بعد، وقت الانضمام الفعلي إذا بدأ)
+        joined_at = datetime.now() if session.get("started_at") else None
+        session["participants"].append({"id": user.id, "name": user.first_name, "username": user.username or "", "joined_at": joined_at})
         try:
             await query.message.delete()
         except Exception:
@@ -2817,8 +2834,20 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("✅ تم تسجيل حضورك مسبقاً!", show_alert=True)
             return
         present_users.add(user.id)
-        # تسجيل في الإحصائيات
-        study_min = session.get("study", 0)
+        # تسجيل في الإحصائيات مع حساب الوقت الفعلي من لحظة الانضمام
+        full_study_min = session.get("study", 0)
+        started_at = session.get("started_at")
+        # ابحث عن وقت انضمام هذا المستخدم تحديداً
+        participant_joined_at = None
+        for p in session.get("participants", []):
+            if p["id"] == user.id:
+                participant_joined_at = p.get("joined_at")
+                break
+        if started_at and participant_joined_at:
+            elapsed_before_join = (participant_joined_at - started_at).total_seconds() / 60
+            effective_study_min = max(0, int(full_study_min - elapsed_before_join))
+        else:
+            effective_study_min = full_study_min
         if tgt_chat not in _session_stats:
             _session_stats[tgt_chat] = {}
         stats = _session_stats[tgt_chat]
@@ -2827,13 +2856,13 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         stats[user.id]["name"] = user.first_name
         stats[user.id]["username"] = user.username or ""
         stats[user.id]["sessions"] += 1
-        stats[user.id]["study_minutes"] += study_min
+        stats[user.id]["study_minutes"] += effective_study_min
         # سجل يومي للفلترة الزمنية
         today_str = datetime.now().strftime("%Y-%m-%d")
-        log_entry = {"date": today_str, "study_minutes": study_min}
+        log_entry = {"date": today_str, "study_minutes": effective_study_min}
         stats[user.id].setdefault("log", []).append(log_entry)
         save_data()
-        await query.answer("✅ تم تسجيل حضورك في الإحصائيات!", show_alert=True)
+        await query.answer(f"✅ تم تسجيل حضورك! ({effective_study_min} دقيقة دراسة)", show_alert=True)
         return
 
     # ── بدء السشن — عدّ تنازلي ──
@@ -2873,6 +2902,11 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
                 await context.bot.delete_message(tgt_chat, old_msg_id)
             except Exception:
                 pass
+        # تسجيل وقت بدء السشن وتحديث joined_at لكل المشاركين الحاليين
+        session["started_at"] = datetime.now()
+        for p in session["participants"]:
+            if p.get("joined_at") is None:
+                p["joined_at"] = session["started_at"]
         # تحويل رسالة العدّ إلى بطاقة السشن النشط
         session["phase"] = "studying"
         names = " | ".join(_html_module.escape(p["name"]) for p in session["participants"])
@@ -2933,6 +2967,33 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer(f"✅ السشن {next_ord} جاهز — اضغط بدء!")
         return
 
+    # ── إلغاء سشن معين من قبل المشرف ──
+    if data.startswith("sess_cancel_admin:"):
+        parts = data.split(":")
+        tgt_chat = int(parts[1])
+        tgt_sess = int(parts[2])
+        # التحقق من صلاحيات المشرف
+        is_admin_user = await is_admin_by_id(context, tgt_chat, user.id)
+        if not is_admin_user and user.id != OWNER_CHAT_ID:
+            await query.answer("❌ هذا الزر للمشرفين فقط.", show_alert=True)
+            return
+        if tgt_chat not in _sessions or tgt_sess not in _sessions[tgt_chat]:
+            await query.answer("❌ هذا السشن لم يعد موجوداً.", show_alert=True)
+            return
+        session = _sessions[tgt_chat][tgt_sess]
+        task = session.get("task")
+        if task and not task.done():
+            task.cancel()
+        _pending_next_session.pop((tgt_chat, tgt_sess), None)
+        ordinal = _session_ordinal(session.get("session_num", 1))
+        _sessions[tgt_chat].pop(tgt_sess, None)
+        if not _sessions.get(tgt_chat):
+            _sessions.pop(tgt_chat, None)
+        await query.answer(f"✅ تم إلغاء السشن {ordinal}.")
+        # تحديث رسالة قائمة السشنات النشطة
+        await _send_active_sessions_message(tgt_chat, context, edit_message=query.message)
+        return
+
 
 async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """إنهاء السشن — قائد السشن أو المالك فقط."""
@@ -2970,6 +3031,114 @@ async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏁 *انتهت السشنات!*\n\n{summary}",
         parse_mode="Markdown",
     )
+
+
+async def _send_active_sessions_message(chat_id: int, context, edit_message=None):
+    """يبني ويرسل (أو يعدّل) رسالة السشنات النشطة مع أزرار الإلغاء للمشرفين."""
+    group_sessions = _sessions.get(chat_id, {})
+    if not group_sessions:
+        text = "ℹ️ لا توجد سشنات نشطة في المجموعة حالياً."
+        keyboard = None
+    else:
+        lines = []
+        buttons = []
+        for sess_id, sess in group_sessions.items():
+            ordinal = _session_ordinal(sess.get("session_num", 1))
+            creator = _html_module.escape(sess.get("creator_name", "؟"))
+            phase = "⏳ انتظار" if sess.get("phase") == "waiting" else "🔴 جاري الدراسة"
+            participants = sess.get("participants", [])
+            names = " | ".join(_html_module.escape(p["name"]) for p in participants) or "لا أحد"
+            lines.append(
+                f"📌 <b>السشن {ordinal}</b> — {phase}\n"
+                f"👤 المنظم: {creator}\n"
+                f"⏱ {sess['study']}د دراسة / ☕ {sess['break']}د استراحة\n"
+                f"👥 المشاركون ({len(participants)}): {names}"
+            )
+            buttons.append([
+                InlineKeyboardButton(
+                    f"❌ إلغاء السشن {ordinal}",
+                    callback_data=f"sess_cancel_admin:{chat_id}:{sess_id}"
+                )
+            ])
+        text = "📋 <b>السشنات النشطة</b>\n\n" + "\n\n".join(lines)
+        keyboard = InlineKeyboardMarkup(buttons)
+
+    if edit_message:
+        try:
+            await edit_message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+    else:
+        await context.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def do_active_sessions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعرض السشنات النشطة مع أزرار الإلغاء — للمشرفين فقط."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يشتغل في المجموعات فقط.")
+        return
+    is_admin_user = await is_admin_by_id(context, chat.id, user.id)
+    if not is_admin_user and user.id != OWNER_CHAT_ID:
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    await _send_active_sessions_message(chat.id, context)
+
+
+async def do_leave_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يسمح للعضو بالانسحاب من السشن الذي هو مشارك فيه."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يشتغل في المجموعات فقط.")
+        return
+    chat_id = chat.id
+    user_id = user.id
+    group_sessions = _sessions.get(chat_id, {})
+    if not group_sessions:
+        await update.message.reply_text("⚠️ لا يوجد سشن نشط حالياً.")
+        return
+    # البحث عن السشن الذي يشارك فيه العضو
+    found_sess_id = None
+    for sess_id, sess in group_sessions.items():
+        if any(p["id"] == user_id for p in sess.get("participants", [])):
+            found_sess_id = sess_id
+            break
+    if found_sess_id is None:
+        await update.message.reply_text("⚠️ أنت لست مشاركاً في أي سشن نشط حالياً.")
+        return
+    session = group_sessions[found_sess_id]
+    # إذا كان هو المنشئ لا يمكنه الانسحاب، بل يجب عليه إنهاء السشن
+    if session.get("creator_id") == user_id:
+        await update.message.reply_text(
+            "⚠️ أنت منظم هذا السشن، لا تقدر تنسحب منه.\n"
+            "لإنهاء السشن اكتب: <b>انهاء سشن</b>",
+            parse_mode="HTML"
+        )
+        return
+    # إزالة العضو من قائمة المشاركين
+    session["participants"] = [p for p in session["participants"] if p["id"] != user_id]
+    ordinal = _session_ordinal(session.get("session_num", 1))
+    await update.message.reply_text(
+        f"✅ {_html_module.escape(user.first_name)} انسحب من السشن {ordinal}.",
+        parse_mode="HTML"
+    )
+    # تحديث رسالة السشن إذا كانت موجودة
+    msg_id = session.get("message_id")
+    if msg_id:
+        try:
+            text, keyboard = build_session_message(chat_id, found_sess_id)
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id,
+                text=text, reply_markup=keyboard, parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
 
 async def do_stop_focus(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3246,6 +3415,8 @@ COMMAND_HANDLERS = {
     "delete_reply": do_delete_auto_reply,
     "list_replies": do_list_auto_replies,
     "end_session": do_end_session,
+    "leave_session": do_leave_session,
+    "active_sessions": do_active_sessions,
     "stop_focus": do_stop_focus,
     "help": show_help,
     "rate_limit": do_rate_limit,
