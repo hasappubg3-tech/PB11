@@ -3247,37 +3247,8 @@ async def do_list_auto_replies(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
-async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعرض أفضل 10 مشاركين في السشنات بالمجموعة."""
-    chat_id = update.effective_chat.id
-    chat = update.effective_chat
-    if chat.type not in ("group", "supergroup"):
-        await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
-        return
-    stats = _session_stats.get(chat_id, {})
-    text = _build_stats_text(stats, "all")
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📅 اليوم", callback_data=f"statsperiod:{chat_id}:today"),
-            InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
-            InlineKeyboardButton("🗓 آخر شهر", callback_data=f"statsperiod:{chat_id}:month"),
-        ]
-    ])
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
-
-
-def _build_stats_text(stats: dict, period: str) -> str:
-    """يبني نص الإحصائيات حسب الفترة: all / today / week / month."""
-    if not stats:
-        return "📊 لا توجد إحصائيات بعد.\nابدأ سشناً واضغط <b>انا موجود</b> عند انتهاء الدراسة."
-
-    period_labels = {
-        "all":   "📊 <b>إحصائيات كل الوقت — أفضل 10</b>",
-        "today": "📅 <b>إحصائيات اليوم — أفضل 10</b>",
-        "week":  "📆 <b>إحصائيات آخر أسبوع — أفضل 10</b>",
-        "month": "🗓 <b>إحصائيات آخر شهر — أفضل 10</b>",
-    }
-
+def _get_sorted_rows(stats: dict, period: str) -> list:
+    """يُرجع قائمة مرتبة بالمشاركين حسب الفترة."""
     now = datetime.now()
     if period == "today":
         cutoff = now.strftime("%Y-%m-%d")
@@ -3291,11 +3262,9 @@ def _build_stats_text(stats: dict, period: str) -> str:
     rows = []
     for uid, u in stats.items():
         if cutoff is None:
-            # كل الوقت — استخدم القيم الإجمالية
             sessions = u.get("sessions", 0)
             mins = u.get("study_minutes", 0)
         else:
-            # فلتر حسب التاريخ من السجل
             log = u.get("log", [])
             if period == "today":
                 filtered = [e for e in log if e.get("date", "") == cutoff]
@@ -3303,62 +3272,173 @@ def _build_stats_text(stats: dict, period: str) -> str:
                 filtered = [e for e in log if e.get("date", "") >= cutoff]
             sessions = len(filtered)
             mins = sum(e.get("study_minutes", 0) for e in filtered)
-
         if sessions == 0 and mins == 0:
             continue
-        rows.append({"name": u.get("name", "؟"), "sessions": sessions, "study_minutes": mins})
-
-    if not rows:
-        return f"{period_labels.get(period, '')}\n\n⚠️ لا توجد إحصائيات لهذه الفترة."
+        rows.append({"uid": uid, "name": u.get("name", "؟"), "sessions": sessions, "study_minutes": mins})
 
     rows.sort(key=lambda x: x["study_minutes"], reverse=True)
-    rows = rows[:10]
+    return rows[:10]
+
+
+def _period_label(period: str) -> str:
+    return {
+        "all":   "📊 الإحصائيات الكلية",
+        "today": "📅 آخر يوم",
+        "week":  "📆 آخر أسبوع",
+        "month": "🗓 آخر شهر",
+    }.get(period, "📊 الإحصائيات")
+
+
+def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
+    """يبني رسالة + أزرار عمودية لأفضل 10 مشاركين."""
+    rows = _get_sorted_rows(stats, period)
+    label = _period_label(period)
+
+    if not rows:
+        text = f"{label}\n\n⚠️ لا توجد إحصائيات لهذه الفترة."
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")]
+        ])
+        return text, keyboard
+
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
-    lines = [period_labels.get(period, "📊"), ""]
+    buttons = []
     for i, row in enumerate(rows):
-        name = _html_module.escape(row["name"])
         mins = row["study_minutes"]
         hours = mins // 60
         rem = mins % 60
         time_str = f"{hours}س {rem}د" if hours else f"{rem}د"
-        lines.append(f"{medals[i]} {name} — {row['sessions']} جلسة | ⏱ {time_str}")
+        btn_label = f"{medals[i]} {row['name']}  ·  {row['sessions']} جلسة  ·  {time_str}"
+        buttons.append([
+            InlineKeyboardButton(btn_label, callback_data=f"statsuser:{chat_id}:{row['uid']}:{period}")
+        ])
+    buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")])
+
+    text = f"<b>{label}</b>\n\nاضغط على اسم لعرض إحصائياته التفصيلية 👇"
+    return text, InlineKeyboardMarkup(buttons)
+
+
+def _build_period_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    """يبني لوحة اختيار الفترة الزمنية."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📊 الإحصائيات الكلية", callback_data=f"statsperiod:{chat_id}:all"),
+            InlineKeyboardButton("📅 آخر يوم",            callback_data=f"statsperiod:{chat_id}:today"),
+        ],
+        [
+            InlineKeyboardButton("📆 آخر أسبوع",          callback_data=f"statsperiod:{chat_id}:week"),
+            InlineKeyboardButton("🗓 آخر شهر",             callback_data=f"statsperiod:{chat_id}:month"),
+        ],
+    ])
+
+
+async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعرض قائمة اختيار فترة الإحصائيات."""
+    chat = update.effective_chat
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
+        return
+    chat_id = chat.id
+    await update.message.reply_text(
+        "📊 <b>إحصائيات الدراسة</b>\n\nاختر الفترة الزمنية:",
+        parse_mode="HTML",
+        reply_markup=_build_period_keyboard(chat_id),
+    )
+
+
+# يُبقى للتوافق مع أي استخدام داخلي آخر
+def _build_stats_text(stats: dict, period: str) -> str:
+    rows = _get_sorted_rows(stats, period)
+    label = _period_label(period)
+    if not rows:
+        return f"{label}\n\n⚠️ لا توجد إحصائيات لهذه الفترة."
+    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+    lines = [f"<b>{label}</b>", ""]
+    for i, row in enumerate(rows):
+        mins = row["study_minutes"]
+        hours = mins // 60
+        rem = mins % 60
+        time_str = f"{hours}س {rem}د" if hours else f"{rem}د"
+        lines.append(f"{medals[i]} {_html_module.escape(row['name'])} — {row['sessions']} جلسة | ⏱ {time_str}")
     return "\n".join(lines)
 
 
 async def handle_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعالج أزرار فترات الإحصائيات."""
+    """يعالج أزرار الإحصائيات: اختيار فترة، قائمة مشاركين، تفاصيل مستخدم."""
     query = update.callback_query
-    data = query.data  # statsperiod:{chat_id}:{period}
-    parts = data.split(":")
-    if len(parts) != 3:
-        await query.answer()
+    data = query.data
+    await query.answer()
+
+    # ── اختيار الفترة: statsperiod:{chat_id}:{period|back} ──
+    if data.startswith("statsperiod:"):
+        parts = data.split(":")
+        chat_id = int(parts[1])
+        period = parts[2]
+        stats = _session_stats.get(chat_id, {})
+        if period == "back":
+            try:
+                await query.edit_message_text(
+                    "📊 <b>إحصائيات الدراسة</b>\n\nاختر الفترة الزمنية:",
+                    parse_mode="HTML",
+                    reply_markup=_build_period_keyboard(chat_id),
+                )
+            except Exception:
+                pass
+            return
+        text, keyboard = _build_top10_keyboard(stats, chat_id, period)
+        try:
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            pass
         return
 
-    chat_id = int(parts[1])
-    period = parts[2]  # today / week / month / back
-
-    stats = _session_stats.get(chat_id, {})
-
-    if period == "back":
-        text = _build_stats_text(stats, "all")
+    # ── تفاصيل مستخدم: statsuser:{chat_id}:{uid}:{period} ──
+    if data.startswith("statsuser:"):
+        parts = data.split(":")
+        chat_id = int(parts[1])
+        uid = int(parts[2])
+        period = parts[3]
+        stats = _session_stats.get(chat_id, {})
+        u = stats.get(uid)
+        if not u:
+            await query.answer("❌ لا توجد إحصائيات لهذا المستخدم.", show_alert=True)
+            return
+        # إحصائيات الفترة المحددة
+        rows = _get_sorted_rows(stats, period)
+        user_row = next((r for r in rows if r["uid"] == uid), None)
+        # إحصائيات الكل لحساب الترتيب العام
+        all_rows = _get_sorted_rows(stats, "all")
+        rank_all = next((i + 1 for i, r in enumerate(all_rows) if r["uid"] == uid), "-")
+        if user_row:
+            sessions = user_row["sessions"]
+            mins = user_row["study_minutes"]
+        else:
+            sessions, mins = 0, 0
+        hours = mins // 60
+        rem = mins % 60
+        time_str = f"{hours} ساعة و{rem} دقيقة" if hours else f"{mins} دقيقة"
+        label = _period_label(period)
+        name = _html_module.escape(u.get("name", "؟"))
+        medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+        rank_period = next((i + 1 for i, r in enumerate(rows) if r["uid"] == uid), "-")
+        medal = medals[rank_period - 1] if isinstance(rank_period, int) and rank_period <= 10 else "👤"
+        text = (
+            f"{medal} <b>{name}</b>\n"
+            f"──────────────────\n"
+            f"📅 الفترة: <b>{label}</b>\n"
+            f"📚 الجلسات: <b>{sessions}</b>\n"
+            f"⏱ وقت الدراسة: <b>{time_str}</b>\n"
+            f"🏆 الترتيب في الفترة: <b>#{rank_period}</b>\n"
+            f"🌟 الترتيب العام: <b>#{rank_all}</b>"
+        )
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📅 اليوم", callback_data=f"statsperiod:{chat_id}:today"),
-                InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
-                InlineKeyboardButton("🗓 آخر شهر", callback_data=f"statsperiod:{chat_id}:month"),
-            ]
+            [InlineKeyboardButton("🔙 رجوع للقائمة", callback_data=f"statsperiod:{chat_id}:{period}")]
         ])
-    else:
-        text = _build_stats_text(stats, period)
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")]
-        ])
-
-    await query.answer()
-    try:
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
-    except Exception:
-        pass
+        try:
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            pass
+        return
 
 
 async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4651,7 +4731,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_settings_callback, pattern=r"^settings_"))
     app.add_handler(CallbackQueryHandler(handle_focus_callback, pattern=r"^focus_"))
     app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
-    app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^statsperiod:"))
+    app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^(statsperiod|statsuser):"))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_error_handler(error_handler)
