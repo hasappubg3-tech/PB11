@@ -3,3 +3,10 @@ google-genai==1.70.0
 yt-dlp==2026.3.17
 pytubefix==10.3.8
 pymongo[srv]
+google-genai==1.70.0
+pymongo[srv]
+python-telegram-bot==22.7
+pytubefix==10.3.8
+sift-stack-py
+telegram
+yt-dlp==2026.3.17
