@@ -437,6 +437,34 @@ _history_expiry_minutes: int = 5       # مدة صلاحية الرسائل با
 _max_sessions: int = 3
 
 # ============================================================
+# 👋 نظام الترحيب بالأعضاء الجدد
+# ============================================================
+# {chat_id: bool}
+_welcome_enabled: dict = {}
+
+WELCOME_MESSAGES = [
+    "أهلاً وسهلاً بـ {name} في مجموعتنا! 🎉 نتمنى تكون إضافة حلوة للعيلة.",
+    "هلا بـ {name}! 👋 يا هلا وغلا، حياك الله بيننا.",
+    "مرحبا بـ {name}! 🌸 عساك تحس بالأجواء الحلوة من أول يوم.",
+    "أهلاً {name}! ✨ انضمامك للمجموعة يسعدنا، حياك الله.",
+    "يا هلا بـ {name}! 🌟 ربي يوفقك ونتمنى تستفيد وتفيد.",
+    "مرحبا بعضو جديد {name}! 💫 الله يحفظك ويسعدك بيننا.",
+    "أهلاً {name} بمجموعتنا! 🎊 نتمنى تحس بالترحيب من أول لحظة.",
+    "هلا فيك {name}! 🌺 يا هلا بالوجه الجديد، حياك الله وبياك.",
+    "مرحبا بـ {name} بين أهله وناسه! 🌼 الله يبارك فيك.",
+    "أهلاً وسهلاً {name}! 🎈 وصولك يسعدنا، نتمنى تكون معنا دايم.",
+]
+
+# ============================================================
+# 🚫 نظام تقييد الوسائط
+# ============================================================
+# {chat_id: set()} — القيم الممكنة: "photo","video","document","sticker","animation","voice","audio"
+_media_restrictions: dict = {}
+
+# {chat_id: set(user_id)} — الأعضاء المميزون يتجاوزون القيود
+_vip_users: dict = {}
+
+# ============================================================
 # 📊 نظام حد الرسائل
 # ============================================================
 # {f"{chat_id}_{user_id}": {"limit": int, "window_seconds": int, "count": int,
@@ -559,6 +587,9 @@ def save_data():
             "history_expiry_minutes": _history_expiry_minutes,
             "gemini_api_keys": list(_gemini_api_keys),
             "group_gemini_keys": {str(k): v for k, v in _group_gemini_keys.items()},
+            "welcome_enabled": {str(k): v for k, v in _welcome_enabled.items()},
+            "media_restrictions": {str(k): list(v) for k, v in _media_restrictions.items()},
+            "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
         }
         col.replace_one({"_id": "bot_data"}, data, upsert=True)
     except Exception as e:
@@ -602,6 +633,14 @@ def load_data():
         # مفاتيح Gemini الخاصة بالمجموعات
         for k, v in data.get("group_gemini_keys", {}).items():
             _group_gemini_keys[int(k)] = list(v)
+        # نظام الترحيب
+        _welcome_enabled.update({int(k): v for k, v in data.get("welcome_enabled", {}).items()})
+        # تقييد الوسائط
+        for k, v in data.get("media_restrictions", {}).items():
+            _media_restrictions[int(k)] = set(v)
+        # الأعضاء المميزون
+        for k, v in data.get("vip_users", {}).items():
+            _vip_users[int(k)] = set(v)
         logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
         logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
@@ -1257,6 +1296,31 @@ ARABIC_COMMANDS = {
     "إحصائيات": "stats",
     "احصائياتي": "my_stats",
     "إحصائياتي": "my_stats",
+    # الترحيب
+    "تفعيل الترحيب": "enable_welcome",
+    "تشغيل الترحيب": "enable_welcome",
+    "تعطيل الترحيب": "disable_welcome",
+    "إيقاف الترحيب": "disable_welcome",
+    "وقف الترحيب": "disable_welcome",
+    # تقييد الوسائط
+    "تعطيل الصور": "restrict_photo",
+    "تفعيل الصور": "allow_photo",
+    "تعطيل الفيديو": "restrict_video",
+    "تفعيل الفيديو": "allow_video",
+    "تعطيل الملفات": "restrict_document",
+    "تفعيل الملفات": "allow_document",
+    "تعطيل الستيكر": "restrict_sticker",
+    "تفعيل الستيكر": "allow_sticker",
+    "تعطيل الصوت": "restrict_voice",
+    "تفعيل الصوت": "allow_voice",
+    "تعطيل الموسيقى": "restrict_audio",
+    "تفعيل الموسيقى": "allow_audio",
+    "تعطيل الجيف": "restrict_animation",
+    "تفعيل الجيف": "allow_animation",
+    # المميزون
+    "رفع مميز": "vip_add",
+    "تنزيل مميز": "vip_remove",
+    "قائمة المميزين": "vip_list",
 }
 
 
@@ -1772,6 +1836,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         else:
             rows.append([InlineKeyboardButton("🆔 معرّف المجموعة", callback_data=f"settings_grp_id:{cid}")])
         rows.append([InlineKeyboardButton("🔑 إدارة مفاتيح الذكاء", callback_data=f"settings_grp_ai:{cid}")])
+        rows.append([InlineKeyboardButton("➕ إضافة مفاتيح API مباشرة", callback_data=f"settings_grp_addkeys:{cid}")])
         rows.append([InlineKeyboardButton("⚙️ إعدادات الذكاء العامة", callback_data=f"settings_ai_c:{cid}")])
         rows.append([InlineKeyboardButton("🗑 إزالة المجموعة", callback_data=f"settings_grp_del:{cid}")])
         rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_groups")])
@@ -3890,6 +3955,236 @@ async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ============================================================
+# 👋 دوال الترحيب بالأعضاء الجدد
+# ============================================================
+
+async def do_enable_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    _welcome_enabled[chat_id] = True
+    save_data()
+    await update.message.reply_text("✅ تم تفعيل رسائل الترحيب بالأعضاء الجدد.")
+
+
+async def do_disable_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    _welcome_enabled[chat_id] = False
+    save_data()
+    await update.message.reply_text("❌ تم تعطيل رسائل الترحيب.")
+
+
+async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يرحب بالأعضاء الجدد إذا كان الترحيب مفعّلاً."""
+    if not update.message:
+        return
+    chat_id = update.effective_chat.id
+    if not _welcome_enabled.get(chat_id, False):
+        return
+    for member in update.message.new_chat_members:
+        if member.is_bot:
+            continue
+        name = member.first_name or "عضو جديد"
+        msg = random.choice(WELCOME_MESSAGES).format(name=name)
+        try:
+            await update.message.reply_text(msg)
+        except Exception:
+            pass
+
+
+# ============================================================
+# 🚫 دوال تقييد الوسائط
+# ============================================================
+
+def _is_vip(chat_id: int, user_id: int) -> bool:
+    """يتحقق إن كان العضو مميزاً في المجموعة."""
+    return user_id in _vip_users.get(chat_id, set())
+
+
+async def _check_media_restriction(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, media_type: str
+) -> bool:
+    """يحذف الوسائط المقيّدة ويعيد True إذا تم الحذف."""
+    if not update.message or not update.effective_chat:
+        return False
+    chat = update.effective_chat
+    if chat.type not in ("group", "supergroup"):
+        return False
+    chat_id = chat.id
+    user_id = update.effective_user.id if update.effective_user else None
+    restricted = _media_restrictions.get(chat_id, set())
+    if media_type not in restricted:
+        return False
+    # المميزون والمشرفون يتجاوزون القيود
+    if user_id and _is_vip(chat_id, user_id):
+        return False
+    if user_id and await is_admin_by_id(context, chat_id, user_id):
+        return False
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    name = update.effective_user.first_name if update.effective_user else "العضو"
+    type_names = {
+        "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
+        "sticker": "الستيكرات", "animation": "الصور المتحركة",
+        "voice": "الرسائل الصوتية", "audio": "الموسيقى",
+    }
+    try:
+        await context.bot.send_message(
+            chat_id,
+            f"🚫 {name}، إرسال {type_names.get(media_type, 'هذا النوع')} غير مسموح في هذه المجموعة."
+        )
+    except Exception:
+        pass
+    return True
+
+
+async def media_handler_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "video")
+
+
+async def media_handler_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "document")
+
+
+async def media_handler_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "sticker")
+
+
+async def media_handler_animation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "animation")
+
+
+async def media_handler_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "voice")
+
+
+async def media_handler_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _check_media_restriction(update, context, "audio")
+
+
+def _make_restrict_cmd(media_type: str):
+    async def _restrict(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await is_admin(update, context):
+            await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+            return
+        chat_id = update.effective_chat.id
+        if chat_id not in _media_restrictions:
+            _media_restrictions[chat_id] = set()
+        _media_restrictions[chat_id].add(media_type)
+        save_data()
+        type_names = {
+            "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
+            "sticker": "الستيكرات", "animation": "الصور المتحركة",
+            "voice": "الرسائل الصوتية", "audio": "الموسيقى",
+        }
+        await update.message.reply_text(
+            f"🚫 تم تعطيل {type_names.get(media_type, media_type)} في المجموعة.\n"
+            f"_الأعضاء المميزون والمشرفون مستثنون._"
+        )
+    return _restrict
+
+
+def _make_allow_cmd(media_type: str):
+    async def _allow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await is_admin(update, context):
+            await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+            return
+        chat_id = update.effective_chat.id
+        if chat_id in _media_restrictions:
+            _media_restrictions[chat_id].discard(media_type)
+        save_data()
+        type_names = {
+            "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
+            "sticker": "الستيكرات", "animation": "الصور المتحركة",
+            "voice": "الرسائل الصوتية", "audio": "الموسيقى",
+        }
+        await update.message.reply_text(f"✅ تم السماح بـ{type_names.get(media_type, media_type)} في المجموعة.")
+    return _allow
+
+
+# إنشاء الدوال الـ 14 تلقائياً
+do_restrict_photo = _make_restrict_cmd("photo")
+do_allow_photo = _make_allow_cmd("photo")
+do_restrict_video = _make_restrict_cmd("video")
+do_allow_video = _make_allow_cmd("video")
+do_restrict_document = _make_restrict_cmd("document")
+do_allow_document = _make_allow_cmd("document")
+do_restrict_sticker = _make_restrict_cmd("sticker")
+do_allow_sticker = _make_allow_cmd("sticker")
+do_restrict_voice = _make_restrict_cmd("voice")
+do_allow_voice = _make_allow_cmd("voice")
+do_restrict_audio = _make_restrict_cmd("audio")
+do_allow_audio = _make_allow_cmd("audio")
+do_restrict_animation = _make_restrict_cmd("animation")
+do_allow_animation = _make_allow_cmd("animation")
+
+
+# ============================================================
+# ⭐ دوال الأعضاء المميزين
+# ============================================================
+
+async def do_vip_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """رفع عضو إلى مميز — يتجاوز قيود الوسائط."""
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    target = await get_target_user(update)
+    if not target:
+        await update.message.reply_text("⚠️ رد على رسالة العضو اللي تبيه مميزاً.")
+        return
+    if chat_id not in _vip_users:
+        _vip_users[chat_id] = set()
+    _vip_users[chat_id].add(target.id)
+    save_data()
+    await update.message.reply_text(
+        f"⭐ تم رفع {target.first_name} إلى عضو مميز.\n"
+        f"_يستطيع الآن إرسال جميع أنواع الوسائط حتى لو كانت مقيّدة._"
+    )
+
+
+async def do_vip_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تنزيل عضو من المميزين."""
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    target = await get_target_user(update)
+    if not target:
+        await update.message.reply_text("⚠️ رد على رسالة العضو اللي تبي تنزّله من المميزين.")
+        return
+    if chat_id in _vip_users:
+        _vip_users[chat_id].discard(target.id)
+    save_data()
+    await update.message.reply_text(f"✅ تم تنزيل {target.first_name} من قائمة المميزين.")
+
+
+async def do_vip_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """عرض قائمة الأعضاء المميزين في المجموعة."""
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    vips = _vip_users.get(chat_id, set())
+    if not vips:
+        await update.message.reply_text("⭐ لا يوجد أعضاء مميزون في هذه المجموعة حالياً.")
+        return
+    lines = [f"⭐ *الأعضاء المميزون في المجموعة:*\n"]
+    for uid in vips:
+        user_obj = _id_to_user.get(uid)
+        name = user_obj.first_name if user_obj else str(uid)
+        username = f" (@{user_obj.username})" if user_obj and user_obj.username else ""
+        lines.append(f"• {name}{username}")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 COMMAND_HANDLERS = {
     "ban": do_ban,
     "unban": do_unban,
@@ -3915,6 +4210,28 @@ COMMAND_HANDLERS = {
     "cancel_rate_limit": do_cancel_rate_limit,
     "stats": show_group_stats,
     "my_stats": show_my_stats,
+    # الترحيب
+    "enable_welcome": do_enable_welcome,
+    "disable_welcome": do_disable_welcome,
+    # تقييد الوسائط
+    "restrict_photo": do_restrict_photo,
+    "allow_photo": do_allow_photo,
+    "restrict_video": do_restrict_video,
+    "allow_video": do_allow_video,
+    "restrict_document": do_restrict_document,
+    "allow_document": do_allow_document,
+    "restrict_sticker": do_restrict_sticker,
+    "allow_sticker": do_allow_sticker,
+    "restrict_voice": do_restrict_voice,
+    "allow_voice": do_allow_voice,
+    "restrict_audio": do_restrict_audio,
+    "allow_audio": do_allow_audio,
+    "restrict_animation": do_restrict_animation,
+    "allow_animation": do_allow_animation,
+    # المميزون
+    "vip_add": do_vip_add,
+    "vip_remove": do_vip_remove,
+    "vip_list": do_vip_list,
 }
 
 
@@ -4436,6 +4753,10 @@ async def bot_reply_to_photo_response(update: Update, context: ContextTypes.DEFA
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.photo:
+        return
+
+    # فحص تقييد الصور أولاً
+    if await _check_media_restriction(update, context, "photo"):
         return
 
     caption = update.message.caption or ""
@@ -5159,7 +5480,14 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
     app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^(statsperiod|statsuser):"))
     app.add_handler(CallbackQueryHandler(handle_help_callback, pattern=r"^help_"))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_member))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(MessageHandler(filters.VIDEO, media_handler_video))
+    app.add_handler(MessageHandler(filters.Document.ALL, media_handler_document))
+    app.add_handler(MessageHandler(filters.Sticker.ALL, media_handler_sticker))
+    app.add_handler(MessageHandler(filters.ANIMATION, media_handler_animation))
+    app.add_handler(MessageHandler(filters.VOICE, media_handler_voice))
+    app.add_handler(MessageHandler(filters.AUDIO, media_handler_audio))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_error_handler(error_handler)
 
