@@ -1512,39 +1512,46 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "🔨 *أوامر الإدارة*\n"
             "_رد على رسالة العضو واكتب الأمر_\n\n"
             "• `حظر` — حظر عضو\n"
-            "• `رفع الحظر` — رفع الحظر\n"
+            "• `الغاء الحظر` — رفع الحظر عن عضو\n"
             "• `كتم` — كتم عضو\n"
-            "• `رفع كتم` — رفع الكتم\n"
-            "• `طرد` — طرد عضو\n"
+            "• `الغاء الكتم` — رفع الكتم عن عضو\n"
+            "• `طرد` — طرد عضو من المجموعة\n"
             "• `انذار` — إنذار عضو\n"
             "• `تثبيت` — تثبيت رسالة\n"
-            "• `إلغاء تثبيت` — إلغاء التثبيت\n"
+            "• `إلغاء تثبيت` — إلغاء تثبيت رسالة\n"
             "• `حذف` — حذف رسالة\n"
-            "• `معلومات` — معلومات عن عضو"
+            "• `معلومات` — معلومات عن عضو\n"
+            "• `حد الرسائل` — تفعيل حد معين للرسائل\n"
+            "• `الغاء حد الرسائل` — إلغاء حد الرسائل"
         )
     elif data == "help_owner":
         text = (
             "👑 *أوامر المالك فقط*\n\n"
             "• `رفع مشرف` — رفع عضو مشرفاً بدون صلاحيات\n"
-            "  \\(رد على رسالته أو اكتب @يوزرنيم\\)\n"
+            "  _رد على رسالته أو اكتب @يوزرنيم_\n"
             "• `تنزيل عضو` — تنزيل مشرف إلى عضو عادي\n"
-            "  \\(رد على رسالته أو اكتب @يوزرنيم\\)"
+            "  _رد على رسالته أو اكتب @يوزرنيم_"
         )
     elif data == "help_study":
         text = (
             "🎯 *جلسات الدراسة \\(السشنات\\)*\n\n"
-            "• اكتب `سشن` أو `بدء سشن` أو `اميرة سوي سشن` لبدء جلسة\n"
-            "• `انهاء سشن` — إنهاء السشن النشط \\(للمشرفين\\)\n"
-            "• `سشناتي` — عرض السشنات النشطة\n\n"
-            "_السشن يحدد وقت الدراسة والراحة ويتابع المشاركين_"
+            "• `سشن` أو `بدء سشن` أو `اميرة سوي سشن` — بدء جلسة دراسة\n"
+            "• `انهاء سشن` — إنهاء السشن _\\(رد على رسالة السشن\\)_\n"
+            "  _للمشرف أو قائد السشن فقط_\n"
+            "• `الانسحاب` أو `انسحاب` — الانسحاب من السشن الحالي\n"
+            "• `انسحاب من السشن` — الانسحاب من السشن\n"
+            "• `السشنات النشطة` — عرض السشنات الحالية مع أزرار إلغاء\n"
+            "  _للمشرفين فقط_\n\n"
+            "_البوت يحدد وقت الدراسة والاستراحة ويتابع المشاركين_"
         )
     elif data == "help_focus":
         text = (
             "🚫 *منع التسخيت*\n\n"
             "• `منع التسخيت` — تفعيل وضع التركيز لنفسك\n"
-            "• `إيقاف منع التسخيت` — إيقاف وضع التركيز\n\n"
-            "_لما تفعّله، البوت يحذف رسائلك اللي تخرج عن الدراسة\n"
-            "ويذكّرك بالتركيز_"
+            "• `إيقاف منع التسخيت` — إيقاف وضع التركيز\n"
+            "• `الغاء منع التسخيت` — نفس إيقاف منع التسخيت\n\n"
+            "_لما تفعّله، البوت يراقب رسائلك ويحذّرك أو يحذفها_\n"
+            "_تختار الوضع: تحذير أو حذف أو كتم_"
         )
     elif data == "help_replies":
         text = (
@@ -1552,13 +1559,14 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "_للمشرفين فقط_\n\n"
             "• `اضافة رد` — إضافة كلمة مفتاحية ورد تلقائي لها\n"
             "• `حذف رد [الكلمة]` — حذف رد تلقائي\n"
-            "• `قائمة الردود` — عرض كل الردود التلقائية المضافة"
+            "• `قائمة الردود` — عرض كل الردود التلقائية المضافة\n\n"
+            "_الردود التلقائية تأخذ أولوية على ردود أميرة الافتراضية_"
         )
     elif data == "help_media":
         text = (
             "🎬 *الفيديو والصوت*\n\n"
             "• `اميرة شغلي [اسم الفيديو أو الأغنية]`\n"
-            "  يبحث في يوتيوب ويعرض 5 نتائج للاختيار،\n"
+            "  يبحث في يوتيوب ويعرض 5 نتائج،\n"
             "  ثم تختار تنزيل فيديو أو صوت فقط"
         )
     elif data == "help_bot":
@@ -1566,7 +1574,9 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "🤖 *التحدث مع أميرة*\n\n"
             "• اكتب `اميرة` أو `يا اميرة` متبوعاً بسؤالك\n"
             "• أو رد مباشرة على أي رسالة من أميرة\n\n"
-            "_أميرة تستخدم الذكاء الاصطناعي وتتذكر سياق المحادثة_"
+            "📊 *الإحصائيات*\n\n"
+            "• `الإحصائيات` — إحصائيات نشاط المجموعة\n"
+            "• `إحصائياتي` — إحصائياتك الشخصية"
         )
     elif data == "help_filter":
         text = (
@@ -3375,7 +3385,7 @@ async def handle_session_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إنهاء السشن — قائد السشن أو المالك فقط."""
+    """إنهاء السشن — قائد السشن أو المشرف فقط، ويلغي السشن المرد عليه فقط."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id if update.effective_user else None
 
@@ -3384,31 +3394,57 @@ async def do_end_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ لا يوجد سشن نشط حالياً.")
         return
 
-    # فحص الصلاحية — قائد أي سشن أو المالك
-    caller_is_creator = any(s.get("creator_id") == user_id for s in group_sessions.values())
-    if not caller_is_creator and user_id != OWNER_CHAT_ID:
-        await update.message.reply_text("❌ فقط قائد السشن أو مالك البوت يقدر يلغي السشن.")
+    # محاولة تحديد السشن المقصود عبر الرد على رسالته
+    target_sess_id = None
+    replied_msg_id = (
+        update.message.reply_to_message.message_id
+        if update.message.reply_to_message
+        else None
+    )
+    if replied_msg_id:
+        for sid, sess in group_sessions.items():
+            if sess.get("message_id") == replied_msg_id:
+                target_sess_id = sid
+                break
+
+    # لو ما رد على رسالة، أو ما طابق أي سشن
+    if target_sess_id is None:
+        if len(group_sessions) == 1:
+            # سشن واحد فقط → نحدده تلقائياً
+            target_sess_id = next(iter(group_sessions))
+        else:
+            # أكثر من سشن → اطلب منه يرد على رسالة السشن المراد إلغاؤه
+            await update.message.reply_text(
+                "⚠️ في أكثر من سشن نشط.\n"
+                "رد على رسالة السشن اللي تبي تلغيه واكتب «انهاء سشن»."
+            )
+            return
+
+    session = group_sessions[target_sess_id]
+
+    # فحص الصلاحية: قائد هذا السشن تحديداً أو المشرف أو المالك
+    is_creator = session.get("creator_id") == user_id
+    user_is_admin = await is_admin(update, context)
+    if not is_creator and not user_is_admin and user_id != OWNER_CHAT_ID:
+        await update.message.reply_text("❌ فقط قائد السشن أو المشرف يقدر يلغي السشن.")
         return
 
-    # إلغاء جميع السشنات في المجموعة
-    lines = []
-    for sid, session in list(group_sessions.items()):
-        task = session.get("task")
-        if task and not task.done():
-            task.cancel()
-        _pending_next_session.pop((chat_id, sid), None)
-        count = len(session["participants"])
-        names = " | ".join(p["name"] for p in session["participants"]) or "لا أحد"
-        ordinal = _session_ordinal(session.get("session_num", 1))
-        lines.append(
-            f"📌 السشن {ordinal}: {session['study']}د دراسة / {session['break']}د استراحة — "
-            f"👥 {count} مشارك ({names})"
-        )
-    _db_clear_group_sessions(chat_id)
-    _sessions.pop(chat_id, None)
-    summary = "\n".join(lines)
+    # إلغاء هذا السشن فقط
+    task = session.get("task")
+    if task and not task.done():
+        task.cancel()
+    _pending_next_session.pop((chat_id, target_sess_id), None)
+    ordinal = _session_ordinal(session.get("session_num", 1))
+    count = len(session["participants"])
+    names = " | ".join(p["name"] for p in session["participants"]) or "لا أحد"
+    _db_clear_group_sessions(chat_id)  # يحذف السشن من MongoDB
+    _sessions[chat_id].pop(target_sess_id, None)
+    if not _sessions[chat_id]:
+        _sessions.pop(chat_id, None)
     await update.message.reply_text(
-        f"🏁 *انتهت السشنات!*\n\n{summary}",
+        f"🏁 *انتهى السشن {ordinal}!*\n\n"
+        f"⏱ {session['study']}د دراسة / ☕ {session['break']}د استراحة\n"
+        f"👥 {count} مشارك: {names}",
         parse_mode="Markdown",
     )
 
