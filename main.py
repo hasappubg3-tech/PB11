@@ -1321,6 +1321,9 @@ ARABIC_COMMANDS = {
     "رفع مميز": "vip_add",
     "تنزيل مميز": "vip_remove",
     "قائمة المميزين": "vip_list",
+    # تقييد/رفع الكل
+    "تعطيل الكل": "restrict_all",
+    "تفعيل الكل": "allow_all",
 }
 
 
@@ -1528,8 +1531,8 @@ async def profanity_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to send profanity alert: {e}")
 
 
-async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = InlineKeyboardMarkup([
+def _help_keyboard():
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔨 أوامر الإدارة", callback_data="help_admin"),
          InlineKeyboardButton("👑 أوامر المالك", callback_data="help_owner")],
         [InlineKeyboardButton("🎯 جلسات الدراسة", callback_data="help_study"),
@@ -1538,11 +1541,16 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("🎬 الفيديو والصوت", callback_data="help_media")],
         [InlineKeyboardButton("🤖 التحدث مع أميرة", callback_data="help_bot"),
          InlineKeyboardButton("🛡 فلتر الشتائم", callback_data="help_filter")],
+        [InlineKeyboardButton("📵 تقييد الوسائط", callback_data="help_restrict"),
+         InlineKeyboardButton("👋 الترحيب والمميزون", callback_data="help_welcome")],
     ])
+
+
+async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📋 *قائمة الأوامر*\n\nاختر القسم اللي تبي تشوف أوامره:",
         parse_mode="MarkdownV2",
-        reply_markup=keyboard,
+        reply_markup=_help_keyboard(),
     )
 
 
@@ -1554,20 +1562,10 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     back_btn = [[InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="help_main")]]
 
     if data == "help_main":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔨 أوامر الإدارة", callback_data="help_admin"),
-             InlineKeyboardButton("👑 أوامر المالك", callback_data="help_owner")],
-            [InlineKeyboardButton("🎯 جلسات الدراسة", callback_data="help_study"),
-             InlineKeyboardButton("🚫 منع التسخيت", callback_data="help_focus")],
-            [InlineKeyboardButton("💬 الردود التلقائية", callback_data="help_replies"),
-             InlineKeyboardButton("🎬 الفيديو والصوت", callback_data="help_media")],
-            [InlineKeyboardButton("🤖 التحدث مع أميرة", callback_data="help_bot"),
-             InlineKeyboardButton("🛡 فلتر الشتائم", callback_data="help_filter")],
-        ])
         await query.message.edit_text(
             "📋 *قائمة الأوامر*\n\nاختر القسم اللي تبي تشوف أوامره:",
             parse_mode="MarkdownV2",
-            reply_markup=keyboard,
+            reply_markup=_help_keyboard(),
         )
         return
 
@@ -1585,16 +1583,19 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "• `إلغاء تثبيت` — إلغاء تثبيت رسالة\n"
             "• `حذف` — حذف رسالة\n"
             "• `معلومات` — معلومات عن عضو\n"
-            "• `حد الرسائل` — تفعيل حد معين للرسائل\n"
-            "• `الغاء حد الرسائل` — إلغاء حد الرسائل"
+            "• `الإحصائيات` — إحصائيات نشاط المجموعة\n"
+            "• `إحصائياتي` — إحصائياتك الشخصية"
         )
     elif data == "help_owner":
         text = (
             "👑 *أوامر المالك فقط*\n\n"
-            "• `رفع مشرف` — رفع عضو مشرفاً بدون صلاحيات\n"
+            "• `رفع مشرف` — رفع عضو مشرفاً\n"
             "  _رد على رسالته أو اكتب @يوزرنيم_\n"
             "• `تنزيل عضو` — تنزيل مشرف إلى عضو عادي\n"
-            "  _رد على رسالته أو اكتب @يوزرنيم_"
+            "  _رد على رسالته أو اكتب @يوزرنيم_\n"
+            "• `حد الرسائل` — تفعيل حد معين لرسائل عضو\n"
+            "  _رد على رسالته أو اكتب @يوزرنيم_\n"
+            "• `الغاء حد الرسائل` — إلغاء حد الرسائل عن عضو"
         )
     elif data == "help_study":
         text = (
@@ -1649,6 +1650,36 @@ async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "• يحذف رسائل الشتائم فور وصولها\n"
             "• يشعر المشرفين بكل مخالفة\n"
             "• بعد 3 مخالفات يتم كتم العضو تلقائياً"
+        )
+    elif data == "help_restrict":
+        text = (
+            "📵 *تقييد الوسائط*\n"
+            "_للمشرفين فقط — المشرفون والأعضاء المميزون مستثنون تلقائياً_\n\n"
+            "*تعطيل نوع معين:*\n"
+            "• `تعطيل الصور` / `تفعيل الصور`\n"
+            "• `تعطيل الفيديو` / `تفعيل الفيديو`\n"
+            "• `تعطيل الملفات` / `تفعيل الملفات`\n"
+            "• `تعطيل الستيكر` / `تفعيل الستيكر`\n"
+            "• `تعطيل الصوت` / `تفعيل الصوت`\n"
+            "• `تعطيل الموسيقى` / `تفعيل الموسيقى`\n"
+            "• `تعطيل الجيف` / `تفعيل الجيف`\n\n"
+            "*تعطيل أو تفعيل الكل دفعة واحدة:*\n"
+            "• `تعطيل الكل` — يقيّد جميع أنواع الوسائط\n"
+            "• `تفعيل الكل` — يرفع جميع القيود"
+        )
+    elif data == "help_welcome":
+        text = (
+            "👋 *الترحيب والأعضاء المميزون*\n"
+            "_للمشرفين فقط_\n\n"
+            "*الترحيب بالأعضاء الجدد:*\n"
+            "• `تفعيل الترحيب` — تشغيل رسائل الترحيب\n"
+            "• `تعطيل الترحيب` — إيقاف رسائل الترحيب\n"
+            "_البوت يرسل رسالة ترحيب عشوائية لكل عضو جديد_\n\n"
+            "*الأعضاء المميزون:*\n"
+            "_يتجاوزون جميع تقييدات الوسائط_\n"
+            "• `رفع مميز` — رفع عضو إلى مميز _\\(رد على رسالته\\)_\n"
+            "• `تنزيل مميز` — تنزيل عضو من المميزين _\\(رد على رسالته\\)_\n"
+            "• `قائمة المميزين` — عرض قائمة المميزين"
         )
     else:
         return
@@ -4185,6 +4216,44 @@ async def do_vip_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+# ============================================================
+# 🔴🟢 تعطيل / تفعيل جميع الوسائط دفعة واحدة
+# ============================================================
+
+_ALL_MEDIA_TYPES = {"photo", "video", "document", "sticker", "animation", "voice", "audio"}
+
+
+async def do_restrict_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تقييد جميع أنواع الوسائط في المجموعة دفعة واحدة."""
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    _media_restrictions[chat_id] = set(_ALL_MEDIA_TYPES)
+    save_data()
+    await update.message.reply_text(
+        "🚫 *تم تعطيل جميع الوسائط في المجموعة*\n\n"
+        "المحظورة: الصور، الفيديو، الملفات، الستيكر، الجيف، الصوت، الموسيقى\n\n"
+        "_المشرفون والأعضاء المميزون مستثنون تلقائياً_",
+        parse_mode="Markdown"
+    )
+
+
+async def do_allow_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """رفع جميع تقييدات الوسائط في المجموعة دفعة واحدة."""
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
+        return
+    chat_id = update.effective_chat.id
+    _media_restrictions[chat_id] = set()
+    save_data()
+    await update.message.reply_text(
+        "✅ *تم السماح بجميع الوسائط في المجموعة*\n\n"
+        "لا توجد أي قيود على الوسائط حالياً.",
+        parse_mode="Markdown"
+    )
+
+
 COMMAND_HANDLERS = {
     "ban": do_ban,
     "unban": do_unban,
@@ -4232,6 +4301,9 @@ COMMAND_HANDLERS = {
     "vip_add": do_vip_add,
     "vip_remove": do_vip_remove,
     "vip_list": do_vip_list,
+    # الكل دفعة واحدة
+    "restrict_all": do_restrict_all,
+    "allow_all": do_allow_all,
 }
 
 
