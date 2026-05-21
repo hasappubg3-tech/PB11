@@ -590,6 +590,8 @@ def save_data():
             "welcome_enabled": {str(k): v for k, v in _welcome_enabled.items()},
             "media_restrictions": {str(k): list(v) for k, v in _media_restrictions.items()},
             "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
+            "warn_data": {str(k): v for k, v in warn_data.items()},
+            "profanity_violations": {str(k): v for k, v in profanity_violations.items()},
         }
         col.replace_one({"_id": "bot_data"}, data, upsert=True)
     except Exception as e:
@@ -641,6 +643,9 @@ def load_data():
         # الأعضاء المميزون
         for k, v in data.get("vip_users", {}).items():
             _vip_users[int(k)] = set(v)
+        # عدادات الإنذارات ومخالفات الشتائم
+        warn_data.update({k: v for k, v in data.get("warn_data", {}).items()})
+        profanity_violations.update({k: v for k, v in data.get("profanity_violations", {}).items()})
         logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
         logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
@@ -1302,28 +1307,119 @@ ARABIC_COMMANDS = {
     "تعطيل الترحيب": "disable_welcome",
     "إيقاف الترحيب": "disable_welcome",
     "وقف الترحيب": "disable_welcome",
-    # تقييد الوسائط
+    # تقييد الوسائط — الصور
     "تعطيل الصور": "restrict_photo",
+    "قفل الصور": "restrict_photo",
+    "منع الصور": "restrict_photo",
+    "وقف الصور": "restrict_photo",
+    "إيقاف الصور": "restrict_photo",
+    "ايقاف الصور": "restrict_photo",
     "تفعيل الصور": "allow_photo",
+    "فتح الصور": "allow_photo",
+    "السماح بالصور": "allow_photo",
+    "سماح الصور": "allow_photo",
+    "تشغيل الصور": "allow_photo",
+    # الفيديو
     "تعطيل الفيديو": "restrict_video",
+    "قفل الفيديو": "restrict_video",
+    "منع الفيديو": "restrict_video",
+    "وقف الفيديو": "restrict_video",
+    "إيقاف الفيديو": "restrict_video",
+    "ايقاف الفيديو": "restrict_video",
     "تفعيل الفيديو": "allow_video",
+    "فتح الفيديو": "allow_video",
+    "السماح بالفيديو": "allow_video",
+    "سماح الفيديو": "allow_video",
+    "تشغيل الفيديو": "allow_video",
+    # الملفات
     "تعطيل الملفات": "restrict_document",
+    "قفل الملفات": "restrict_document",
+    "منع الملفات": "restrict_document",
+    "وقف الملفات": "restrict_document",
+    "إيقاف الملفات": "restrict_document",
+    "ايقاف الملفات": "restrict_document",
     "تفعيل الملفات": "allow_document",
+    "فتح الملفات": "allow_document",
+    "السماح بالملفات": "allow_document",
+    "سماح الملفات": "allow_document",
+    "تشغيل الملفات": "allow_document",
+    # الستيكر
     "تعطيل الستيكر": "restrict_sticker",
+    "قفل الستيكر": "restrict_sticker",
+    "منع الستيكر": "restrict_sticker",
+    "وقف الستيكر": "restrict_sticker",
+    "إيقاف الستيكر": "restrict_sticker",
+    "ايقاف الستيكر": "restrict_sticker",
+    "تعطيل الستيكرات": "restrict_sticker",
+    "قفل الستيكرات": "restrict_sticker",
+    "منع الستيكرات": "restrict_sticker",
     "تفعيل الستيكر": "allow_sticker",
+    "فتح الستيكر": "allow_sticker",
+    "السماح بالستيكر": "allow_sticker",
+    "سماح الستيكر": "allow_sticker",
+    "تشغيل الستيكر": "allow_sticker",
+    "تفعيل الستيكرات": "allow_sticker",
+    "فتح الستيكرات": "allow_sticker",
+    # الصوت
     "تعطيل الصوت": "restrict_voice",
+    "قفل الصوت": "restrict_voice",
+    "منع الصوت": "restrict_voice",
+    "وقف الصوت": "restrict_voice",
+    "إيقاف الصوت": "restrict_voice",
+    "ايقاف الصوت": "restrict_voice",
+    "تعطيل الرسائل الصوتية": "restrict_voice",
+    "قفل الرسائل الصوتية": "restrict_voice",
+    "منع الرسائل الصوتية": "restrict_voice",
     "تفعيل الصوت": "allow_voice",
+    "فتح الصوت": "allow_voice",
+    "السماح بالصوت": "allow_voice",
+    "سماح الصوت": "allow_voice",
+    "تشغيل الصوت": "allow_voice",
+    "تفعيل الرسائل الصوتية": "allow_voice",
+    "فتح الرسائل الصوتية": "allow_voice",
+    # الموسيقى
     "تعطيل الموسيقى": "restrict_audio",
+    "قفل الموسيقى": "restrict_audio",
+    "منع الموسيقى": "restrict_audio",
+    "وقف الموسيقى": "restrict_audio",
+    "إيقاف الموسيقى": "restrict_audio",
+    "ايقاف الموسيقى": "restrict_audio",
     "تفعيل الموسيقى": "allow_audio",
+    "فتح الموسيقى": "allow_audio",
+    "السماح بالموسيقى": "allow_audio",
+    "سماح الموسيقى": "allow_audio",
+    "تشغيل الموسيقى": "allow_audio",
+    # الجيف
     "تعطيل الجيف": "restrict_animation",
+    "قفل الجيف": "restrict_animation",
+    "منع الجيف": "restrict_animation",
+    "وقف الجيف": "restrict_animation",
+    "إيقاف الجيف": "restrict_animation",
+    "ايقاف الجيف": "restrict_animation",
+    "تعطيل الصور المتحركة": "restrict_animation",
+    "قفل الصور المتحركة": "restrict_animation",
+    "منع الصور المتحركة": "restrict_animation",
     "تفعيل الجيف": "allow_animation",
+    "فتح الجيف": "allow_animation",
+    "السماح بالجيف": "allow_animation",
+    "سماح الجيف": "allow_animation",
+    "تشغيل الجيف": "allow_animation",
+    "تفعيل الصور المتحركة": "allow_animation",
+    "فتح الصور المتحركة": "allow_animation",
     # المميزون
     "رفع مميز": "vip_add",
     "تنزيل مميز": "vip_remove",
     "قائمة المميزين": "vip_list",
     # تقييد/رفع الكل
     "تعطيل الكل": "restrict_all",
+    "قفل الكل": "restrict_all",
+    "منع الكل": "restrict_all",
+    "وقف الكل": "restrict_all",
+    "قفل كل شيء": "restrict_all",
     "تفعيل الكل": "allow_all",
+    "فتح الكل": "allow_all",
+    "السماح بالكل": "allow_all",
+    "فتح كل شيء": "allow_all",
 }
 
 
