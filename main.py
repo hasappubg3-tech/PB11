@@ -2199,7 +2199,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👋 *أهلاً بك!*\n\n"
             "أنا اميرة، بوت مخصصة لإدارة المجموعات.\n\n"
             "إذا تريد تفعيل البوت في مجموعتك، "
-            "تواصل مع مالك البوت وسيضيف مجموعتك للقائمة 😊",
+            "اضف البوت للمجموعة وارفعه مشرف وسيتم التفعيل تلقائيا 😊",
             reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
             parse_mode="Markdown",
         )
