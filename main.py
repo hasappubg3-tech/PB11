@@ -1465,39 +1465,125 @@ async def profanity_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = (
-        "📋 *أوامر إدارة المجموعة:*\n"
-        "_\\(للأوامر الإدارية: رد على رسالة العضو واكتب الأمر\\)_\n\n"
-        "🔨 `حظر` \\- حظر عضو\n"
-        "✅ `رفع الحظر` \\- رفع الحظر عن عضو\n"
-        "🔇 `كتم` \\- كتم عضو\n"
-        "🔊 `رفع كتم` \\- رفع الكتم عن عضو\n"
-        "👢 `طرد` \\- طرد عضو من المجموعة\n"
-        "⚠️ `انذار` \\- إنذار عضو\n"
-        "📌 `تثبيت` \\- تثبيت رسالة\n"
-        "📌 `إلغاء تثبيت` \\- إلغاء تثبيت رسالة\n"
-        "🗑 `حذف` \\- حذف رسالة\n"
-        "ℹ️ `معلومات` \\- معلومات عن عضو\n\n"
-        "👑 *أوامر المالك فقط:*\n"
-        "`رفع مشرف` \\- رفع عضو مشرفاً بدون صلاحيات \\(رد أو @يوزرنيم\\)\n"
-        "`تنزيل عضو` \\- تنزيل مشرف إلى عضو \\(رد أو @يوزرنيم\\)\n\n"
-        "💬 *الردود التلقائية:*\n"
-        "`اضافة رد` \\- إضافة كلمة مفتاحية ورد تلقائي\n"
-        "`حذف رد [الكلمة]` \\- حذف رد تلقائي\n"
-        "`قائمة الردود` \\- عرض جميع الردود التلقائية\n\n"
-        "🎯 *السشنات \\(جلسات الدراسة\\):*\n"
-        "اكتب `سشن` أو `بدء سشن` أو `اميرة سوي سشن` لبدء جلسة\n"
-        "`انهاء سشن` \\- إنهاء السشن النشط \\(للمشرفين\\)\n\n"
-        "🎬 *أوامر الفيديو والصوت:*\n"
-        "`اميرة شغلي [اسم الفيديو]` \\- يبحث ويعرض 5 نتائج للاختيار منها، ثم تختار فيديو أو صوت فقط\n\n"
-        "🤖 *التحدث مع اميرة:*\n"
-        "اكتب `اميرة` أو `يا اميرة` متبوعاً بسؤالك\n"
-        "أو رد على رسالة اميرة مباشرة\n\n"
-        "🛡 *فلتر الشتائم التلقائي:*\n"
-        "يحذف رسائل الشتائم تلقائياً ويشعر المشرفين\\.\n"
-        "بعد 3 مخالفات يتم الكتم التلقائي\\."
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔨 أوامر الإدارة", callback_data="help_admin"),
+         InlineKeyboardButton("👑 أوامر المالك", callback_data="help_owner")],
+        [InlineKeyboardButton("🎯 جلسات الدراسة", callback_data="help_study"),
+         InlineKeyboardButton("🚫 منع التسخيت", callback_data="help_focus")],
+        [InlineKeyboardButton("💬 الردود التلقائية", callback_data="help_replies"),
+         InlineKeyboardButton("🎬 الفيديو والصوت", callback_data="help_media")],
+        [InlineKeyboardButton("🤖 التحدث مع أميرة", callback_data="help_bot"),
+         InlineKeyboardButton("🛡 فلتر الشتائم", callback_data="help_filter")],
+    ])
+    await update.message.reply_text(
+        "📋 *قائمة الأوامر*\n\nاختر القسم اللي تبي تشوف أوامره:",
+        parse_mode="MarkdownV2",
+        reply_markup=keyboard,
     )
-    await update.message.reply_text(help_text, parse_mode="MarkdownV2")
+
+
+async def handle_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    back_btn = [[InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="help_main")]]
+
+    if data == "help_main":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔨 أوامر الإدارة", callback_data="help_admin"),
+             InlineKeyboardButton("👑 أوامر المالك", callback_data="help_owner")],
+            [InlineKeyboardButton("🎯 جلسات الدراسة", callback_data="help_study"),
+             InlineKeyboardButton("🚫 منع التسخيت", callback_data="help_focus")],
+            [InlineKeyboardButton("💬 الردود التلقائية", callback_data="help_replies"),
+             InlineKeyboardButton("🎬 الفيديو والصوت", callback_data="help_media")],
+            [InlineKeyboardButton("🤖 التحدث مع أميرة", callback_data="help_bot"),
+             InlineKeyboardButton("🛡 فلتر الشتائم", callback_data="help_filter")],
+        ])
+        await query.message.edit_text(
+            "📋 *قائمة الأوامر*\n\nاختر القسم اللي تبي تشوف أوامره:",
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard,
+        )
+        return
+
+    if data == "help_admin":
+        text = (
+            "🔨 *أوامر الإدارة*\n"
+            "_رد على رسالة العضو واكتب الأمر_\n\n"
+            "• `حظر` — حظر عضو\n"
+            "• `رفع الحظر` — رفع الحظر\n"
+            "• `كتم` — كتم عضو\n"
+            "• `رفع كتم` — رفع الكتم\n"
+            "• `طرد` — طرد عضو\n"
+            "• `انذار` — إنذار عضو\n"
+            "• `تثبيت` — تثبيت رسالة\n"
+            "• `إلغاء تثبيت` — إلغاء التثبيت\n"
+            "• `حذف` — حذف رسالة\n"
+            "• `معلومات` — معلومات عن عضو"
+        )
+    elif data == "help_owner":
+        text = (
+            "👑 *أوامر المالك فقط*\n\n"
+            "• `رفع مشرف` — رفع عضو مشرفاً بدون صلاحيات\n"
+            "  \\(رد على رسالته أو اكتب @يوزرنيم\\)\n"
+            "• `تنزيل عضو` — تنزيل مشرف إلى عضو عادي\n"
+            "  \\(رد على رسالته أو اكتب @يوزرنيم\\)"
+        )
+    elif data == "help_study":
+        text = (
+            "🎯 *جلسات الدراسة \\(السشنات\\)*\n\n"
+            "• اكتب `سشن` أو `بدء سشن` أو `اميرة سوي سشن` لبدء جلسة\n"
+            "• `انهاء سشن` — إنهاء السشن النشط \\(للمشرفين\\)\n"
+            "• `سشناتي` — عرض السشنات النشطة\n\n"
+            "_السشن يحدد وقت الدراسة والراحة ويتابع المشاركين_"
+        )
+    elif data == "help_focus":
+        text = (
+            "🚫 *منع التسخيت*\n\n"
+            "• `منع التسخيت` — تفعيل وضع التركيز لنفسك\n"
+            "• `إيقاف منع التسخيت` — إيقاف وضع التركيز\n\n"
+            "_لما تفعّله، البوت يحذف رسائلك اللي تخرج عن الدراسة\n"
+            "ويذكّرك بالتركيز_"
+        )
+    elif data == "help_replies":
+        text = (
+            "💬 *الردود التلقائية*\n"
+            "_للمشرفين فقط_\n\n"
+            "• `اضافة رد` — إضافة كلمة مفتاحية ورد تلقائي لها\n"
+            "• `حذف رد [الكلمة]` — حذف رد تلقائي\n"
+            "• `قائمة الردود` — عرض كل الردود التلقائية المضافة"
+        )
+    elif data == "help_media":
+        text = (
+            "🎬 *الفيديو والصوت*\n\n"
+            "• `اميرة شغلي [اسم الفيديو أو الأغنية]`\n"
+            "  يبحث في يوتيوب ويعرض 5 نتائج للاختيار،\n"
+            "  ثم تختار تنزيل فيديو أو صوت فقط"
+        )
+    elif data == "help_bot":
+        text = (
+            "🤖 *التحدث مع أميرة*\n\n"
+            "• اكتب `اميرة` أو `يا اميرة` متبوعاً بسؤالك\n"
+            "• أو رد مباشرة على أي رسالة من أميرة\n\n"
+            "_أميرة تستخدم الذكاء الاصطناعي وتتذكر سياق المحادثة_"
+        )
+    elif data == "help_filter":
+        text = (
+            "🛡 *فلتر الشتائم التلقائي*\n\n"
+            "• يعمل تلقائياً بدون أي أمر\n"
+            "• يحذف رسائل الشتائم فور وصولها\n"
+            "• يشعر المشرفين بكل مخالفة\n"
+            "• بعد 3 مخالفات يتم كتم العضو تلقائياً"
+        )
+    else:
+        return
+
+    await query.message.edit_text(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(back_btn),
+    )
 
 
 # ============================================================
@@ -4149,8 +4235,20 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _stripped_call = _stripped_call.replace(_tr.lower(), "")
     _stripped_call = _stripped_call.strip("،.؟?!_ \t\n")
     if len(_stripped_call) <= 2:
-        reply = random.choice(BOT_RESPONSES)
-        await update.message.reply_text(reply)
+        # أولوية لرد المشرفين المخصص: نبحث في الردود التلقائية عن أي كلمة تشغيل
+        _chat_id_call = update.effective_chat.id if update.effective_chat else None
+        _admin_reply_for_name = None
+        if _chat_id_call and _chat_id_call in _auto_replies:
+            _call_text_lower = user_message.strip().lower()
+            for _kw, _kw_reply in _auto_replies[_chat_id_call].items():
+                if _kw in _call_text_lower:
+                    _admin_reply_for_name = _kw_reply
+                    break
+        if _admin_reply_for_name:
+            await update.message.reply_text(_admin_reply_for_name)
+        else:
+            reply = random.choice(BOT_RESPONSES)
+            await update.message.reply_text(reply)
         return
 
     # ── الردود المحفوظة تأتي أولاً (أسرع ولا تستهلك API) ──
@@ -5024,6 +5122,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_focus_callback, pattern=r"^focus_"))
     app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
     app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^(statsperiod|statsuser):"))
+    app.add_handler(CallbackQueryHandler(handle_help_callback, pattern=r"^help_"))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_error_handler(error_handler)
