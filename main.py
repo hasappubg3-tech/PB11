@@ -255,6 +255,52 @@ def generate_with_rotation(model, contents, config):
         raise last_exception
     raise Exception("كل مفاتيح Gemini مستنفدة أو منتهية الصلاحية")
 
+
+def generate_with_rotation_for_group(chat_id: int, model: str, contents, config):
+    """
+    يستدعي Gemini بمفاتيح المجموعة الخاصة إذا وُجدت، وإلا يرجع للمفاتيح الأساسية.
+    نفس منطق rotate الأساسي لكنه معزول عن المفاتيح العامة.
+    """
+    keys = _group_gemini_keys.get(chat_id)
+    if not keys:
+        return generate_with_rotation(model=model, contents=contents, config=config)
+
+    exhausted = _group_exhausted_keys.setdefault(chat_id, set())
+
+    tried = []
+    for i in range(len(keys)):
+        if i in exhausted:
+            continue
+        tried.append(i)
+        client = _make_gemini_client(keys[i])
+        try:
+            return client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as e:
+            if _is_quota_error(e) or _is_invalid_key_error(e):
+                exhausted.add(i)
+            else:
+                raise
+
+    last_exc = None
+    for i in range(len(keys)):
+        if i in tried:
+            continue
+        client = _make_gemini_client(keys[i])
+        try:
+            result = client.models.generate_content(model=model, contents=contents, config=config)
+            exhausted.discard(i)
+            return result
+        except Exception as e:
+            if _is_quota_error(e) or _is_invalid_key_error(e):
+                last_exc = e
+            else:
+                raise
+
+    if last_exc:
+        raise last_exc
+    raise Exception(f"كل مفاتيح Gemini الخاصة بالمجموعة {chat_id} مستنفدة")
+
+
 # البرومبت اللي يحدد شخصية البوت — تقدر تعدله
 GEMINI_SYSTEM_PROMPT = (
     "أنت بوت اسمها اميرة تشتغلين في مجموعة تيليغرام عراقية. "
@@ -334,6 +380,15 @@ def _session_ordinal_f(n: int) -> str:
 
 # مجموعة معرّفات المالك الذين ينتظرون إدخال مفاتيح API جديدة
 _pending_api_key_input: set = set()
+
+# مفاتيح Gemini الخاصة بكل مجموعة {chat_id: [key1, key2, ...]}
+_group_gemini_keys: dict = {}
+
+# مؤشرات المفاتيح المستنفدة لكل مجموعة {chat_id: set()}
+_group_exhausted_keys: dict = {}
+
+# المالك ينتظر إدخال مفاتيح API لمجموعة محددة {user_id: chat_id}
+_pending_group_api_key_input: dict = {}
 
 # ============================================================
 # إعدادات الصلاحيات والمجموعات
@@ -503,6 +558,7 @@ def save_data():
             "history_max_messages": _history_max_messages,
             "history_expiry_minutes": _history_expiry_minutes,
             "gemini_api_keys": list(_gemini_api_keys),
+            "group_gemini_keys": {str(k): v for k, v in _group_gemini_keys.items()},
         }
         col.replace_one({"_id": "bot_data"}, data, upsert=True)
     except Exception as e:
@@ -539,10 +595,13 @@ def load_data():
         _history_expiry_minutes = data.get("history_expiry_minutes", _history_expiry_minutes)
         # الردود التلقائية
         _auto_replies.update({int(k): v for k, v in data.get("auto_replies", {}).items()})
-        # مفاتيح Gemini
+        # مفاتيح Gemini الأساسية
         for key in data.get("gemini_api_keys", []):
             if key and key not in _gemini_api_keys:
                 _gemini_api_keys.append(key)
+        # مفاتيح Gemini الخاصة بالمجموعات
+        for k, v in data.get("group_gemini_keys", {}).items():
+            _group_gemini_keys[int(k)] = list(v)
         logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
         logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
@@ -1593,20 +1652,153 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         buttons = []
         for cid in active:
             name = _known_chat_names.get(cid, str(cid))
-            username = _known_chat_usernames.get(cid)
-            if username:
-                buttons.append([InlineKeyboardButton(f"🏘 {name}", url=f"https://t.me/{username}")])
-            else:
-                buttons.append([InlineKeyboardButton(f"🏘 {name}", callback_data=f"settings_grp_info:{cid}")])
+            grp_keys_count = len(_group_gemini_keys.get(cid, []))
+            label = f"🏘 {name}"
+            if grp_keys_count:
+                label += f" 🔑×{grp_keys_count}"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"settings_grp_menu:{cid}")])
         buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
         await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
         await query.answer()
         return
 
-    if data.startswith("settings_grp_info:"):
+    if data.startswith("settings_grp_menu:"):
         cid = int(data.split(":")[1])
         name = _known_chat_names.get(cid, str(cid))
-        await query.answer(f"🆔 {name}\nID: {cid}", show_alert=True)
+        username = _known_chat_usernames.get(cid)
+        grp_keys = _group_gemini_keys.get(cid, [])
+        keys_line = f"🔑 مفاتيح خاصة: *{len(grp_keys)}* مفتاح" if grp_keys else "🔑 مفاتيح خاصة: لا توجد"
+        ai_enabled = _ai_enabled_chats.get(cid, True)
+        ai_line = "🤖 الذكاء: ✅ مفعّل" if ai_enabled else "🤖 الذكاء: ❌ موقف"
+        rows = []
+        if username:
+            rows.append([InlineKeyboardButton("👁 معاينة المجموعة", url=f"https://t.me/{username}")])
+        else:
+            rows.append([InlineKeyboardButton("🆔 معرّف المجموعة", callback_data=f"settings_grp_id:{cid}")])
+        rows.append([InlineKeyboardButton("🔑 إدارة مفاتيح الذكاء", callback_data=f"settings_grp_ai:{cid}")])
+        rows.append([InlineKeyboardButton("⚙️ إعدادات الذكاء العامة", callback_data=f"settings_ai_c:{cid}")])
+        rows.append([InlineKeyboardButton("🗑 إزالة المجموعة", callback_data=f"settings_grp_del:{cid}")])
+        rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_groups")])
+        await query.message.edit_text(
+            f"🏘 *{name}*\n\n{keys_line}\n{ai_line}",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        await query.answer()
+        return
+
+    if data.startswith("settings_grp_id:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        await query.answer(f"{name}\nID: {cid}", show_alert=True)
+        return
+
+    if data.startswith("settings_grp_ai:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        grp_keys = _group_gemini_keys.get(cid, [])
+        total_k = len(grp_keys)
+        exhausted_k = len(_group_exhausted_keys.get(cid, set()))
+        if total_k:
+            keys_text = f"🔑 *{total_k}* مفتاح خاص"
+            if exhausted_k:
+                keys_text += f" ({exhausted_k} نفذ)"
+            else:
+                keys_text += " (كلهم مشحونين ✅)"
+            preview_lines = []
+            for i, k in enumerate(grp_keys):
+                masked = k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..."
+                preview_lines.append(f"  {i+1}. `{masked}`")
+            keys_text += "\n" + "\n".join(preview_lines)
+        else:
+            keys_text = "🔑 لا توجد مفاتيح خاصة\n_سيُستخدم المفاتيح الأساسية للبوت_"
+        rows = [
+            [InlineKeyboardButton("➕ إضافة مفاتيح خاصة", callback_data=f"settings_grp_addkeys:{cid}")],
+        ]
+        if grp_keys:
+            rows.append([InlineKeyboardButton("🗑 حذف كل المفاتيح الخاصة", callback_data=f"settings_grp_clearkeys:{cid}")])
+        rows.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"settings_grp_menu:{cid}")])
+        await query.message.edit_text(
+            f"🤖 *إدارة مفاتيح الذكاء*\n*{name}*\n\n{keys_text}",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        await query.answer()
+        return
+
+    if data.startswith("settings_grp_addkeys:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        _pending_group_api_key_input[query.from_user.id] = cid
+        await query.answer()
+        await query.message.edit_text(
+            f"🔑 *إضافة مفاتيح لـ {name}*\n\n"
+            "أرسل مفاتيح Gemini API — مفتاح واحد في كل سطر.\n\n"
+            "_هذه المفاتيح ستُستخدم حصرياً لهذه المجموعة ولن تؤثر على المفاتيح الأساسية._",
+            parse_mode="Markdown",
+        )
+        return
+
+    if data.startswith("settings_grp_clearkeys:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        _group_gemini_keys.pop(cid, None)
+        _group_exhausted_keys.pop(cid, None)
+        save_data()
+        await query.answer("✅ تم حذف المفاتيح الخاصة")
+        grp_keys = _group_gemini_keys.get(cid, [])
+        rows = [
+            [InlineKeyboardButton("➕ إضافة مفاتيح خاصة", callback_data=f"settings_grp_addkeys:{cid}")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data=f"settings_grp_menu:{cid}")],
+        ]
+        await query.message.edit_text(
+            f"🤖 *إدارة مفاتيح الذكاء*\n*{name}*\n\n🔑 لا توجد مفاتيح خاصة\n_سيُستخدم المفاتيح الأساسية للبوت_",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data.startswith("settings_grp_del:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        rows = [
+            [
+                InlineKeyboardButton("✅ نعم، إزالة", callback_data=f"settings_grp_del_confirm:{cid}"),
+                InlineKeyboardButton("❌ إلغاء", callback_data=f"settings_grp_menu:{cid}"),
+            ]
+        ]
+        await query.message.edit_text(
+            f"⚠️ *تأكيد الإزالة*\n\nهل تريد إزالة *{name}* من قائمة المجموعات النشطة؟",
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode="Markdown",
+        )
+        await query.answer()
+        return
+
+    if data.startswith("settings_grp_del_confirm:"):
+        cid = int(data.split(":")[1])
+        name = _known_chat_names.get(cid, str(cid))
+        _owner_known_chats.discard(cid)
+        _known_chat_names.pop(cid, None)
+        _known_chat_usernames.pop(cid, None)
+        _group_gemini_keys.pop(cid, None)
+        _group_exhausted_keys.pop(cid, None)
+        save_data()
+        await query.answer(f"✅ تم إزالة {name}")
+        active = sorted(_owner_known_chats)
+        lines = ["🏘 *المجموعات النشطة*\n"]
+        if active:
+            lines.append(f"📊 إجمالي المجموعات: *{len(active)}*\n")
+        else:
+            lines.append("_لا توجد مجموعات نشطة بعد_")
+        buttons = []
+        for c in active:
+            n = _known_chat_names.get(c, str(c))
+            gk = len(_group_gemini_keys.get(c, []))
+            lbl = f"🏘 {n}" + (f" 🔑×{gk}" if gk else "")
+            buttons.append([InlineKeyboardButton(lbl, callback_data=f"settings_grp_menu:{c}")])
+        buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
+        await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
         return
 
     # ═══════════════════════════════════════
@@ -3968,7 +4160,9 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         contents = _build_contents_with_history(user_id, user_message)
         ai_error = None
         try:
-            response = generate_with_rotation(
+            _call_chat_id = update.effective_chat.id if update.effective_chat else None
+            response = generate_with_rotation_for_group(
+                chat_id=_call_chat_id,
                 model="gemini-2.5-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
@@ -4174,10 +4368,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ============================================================
     if chat and chat.type == "private":
         if user_id != OWNER_CHAT_ID and user_id not in _bot_admins:
+            bot_username = (await context.bot.get_me()).username
             await update.message.reply_text(
                 "👋 *أهلاً بك!*\n\n"
-                "أنا بوت مخصص للعمل في المجموعات.\n"
-                "أضفني لمجموعتك وسأكون سعيداً بمساعدتكم! 😊",
+                "لتفعيل البوت في مجموعتك اتبع هالخطوات:\n\n"
+                f"1️⃣ افتح مجموعتك\n"
+                f"2️⃣ اضغط على اسم المجموعة → *أعضاء* → *إضافة عضو*\n"
+                f"3️⃣ ابحث عن `@{bot_username}` وأضفه\n"
+                f"4️⃣ منح البوت صلاحية إرسال الرسائل\n\n"
+                "✅ البوت يبدأ يشتغل تلقائياً بمجرد إضافته!",
                 parse_mode="Markdown",
             )
             return
@@ -4258,6 +4457,36 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = _activate_rate_limit_data(chat_id_rl, target_id, target_name, count, window_secs)
             await update.message.reply_text(msg, parse_mode="Markdown")
             return
+
+    # ============================================================
+    # معالجة إدخال مفاتيح API الخاصة بمجموعة محددة
+    # ============================================================
+    if user_id and user_id in _pending_group_api_key_input:
+        target_cid = _pending_group_api_key_input.pop(user_id)
+        new_keys = [line.strip() for line in text.splitlines() if line.strip()]
+        if not new_keys:
+            await update.message.reply_text("❗ لم أجد أي مفاتيح. أرسل المفاتيح مرة أخرى، مفتاح في كل سطر.")
+            _pending_group_api_key_input[user_id] = target_cid
+            return
+        grp_list = _group_gemini_keys.setdefault(target_cid, [])
+        _group_exhausted_keys.pop(target_cid, None)
+        added = 0
+        for key in new_keys:
+            if key not in grp_list:
+                grp_list.append(key)
+                added += 1
+        save_data()
+        grp_name = _known_chat_names.get(target_cid, str(target_cid))
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔑 إدارة المفاتيح", callback_data=f"settings_grp_ai:{target_cid}"),
+        ]])
+        await update.message.reply_text(
+            f"✅ تم إضافة *{added}* مفتاح لـ *{grp_name}*\n"
+            f"📊 إجمالي مفاتيحها الآن: *{len(grp_list)}*",
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+        return
 
     # ============================================================
     # معالجة إدخال مفاتيح API الجديدة من المالك
