@@ -2506,6 +2506,13 @@ async def do_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ هذا مشرف، ما يصير تحظره.")
         return
     try:
+        member = await context.bot.get_chat_member(chat_id, target.id)
+        if member.status == "kicked":
+            await update.message.reply_text(f"ℹ️ *{target.full_name}* محظور مسبقاً.", parse_mode="Markdown")
+            return
+    except TelegramError:
+        pass
+    try:
         await context.bot.ban_chat_member(chat_id, target.id)
         name = target.full_name
         await update.message.reply_text(f"🔨 تم حظر المستخدم *{name}* بنجاح.", parse_mode="Markdown")
@@ -2522,6 +2529,13 @@ async def do_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
+    try:
+        member = await context.bot.get_chat_member(chat_id, target.id)
+        if member.status != "kicked":
+            await update.message.reply_text(f"ℹ️ *{target.full_name}* مو محظور أصلاً.", parse_mode="Markdown")
+            return
+    except TelegramError:
+        pass
     try:
         await context.bot.unban_chat_member(chat_id, target.id)
         name = target.full_name
@@ -2543,6 +2557,13 @@ async def do_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ هذا مشرف، ما يصير تكتمه.")
         return
     try:
+        member = await context.bot.get_chat_member(chat_id, target.id)
+        if member.status == "restricted" and not member.can_send_messages:
+            await update.message.reply_text(f"ℹ️ *{target.full_name}* مكتوم مسبقاً.", parse_mode="Markdown")
+            return
+    except TelegramError:
+        pass
+    try:
         await mute_user(context, chat_id, target.id)
         name = target.full_name
         await update.message.reply_text(f"🔇 تم كتم المستخدم *{name}* بنجاح.", parse_mode="Markdown")
@@ -2559,6 +2580,13 @@ async def do_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
     chat_id = update.effective_chat.id
+    try:
+        member = await context.bot.get_chat_member(chat_id, target.id)
+        if member.status != "restricted" or getattr(member, "can_send_messages", True):
+            await update.message.reply_text(f"ℹ️ *{target.full_name}* مو مكتوم أصلاً.", parse_mode="Markdown")
+            return
+    except TelegramError:
+        pass
     try:
         permissions = ChatPermissions(
             can_send_messages=True,
@@ -2588,6 +2616,13 @@ async def do_kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_admin_by_id(context, chat_id, target.id):
         await update.message.reply_text("⚠️ هذا مشرف، ما يصير تطرده.")
         return
+    try:
+        member = await context.bot.get_chat_member(chat_id, target.id)
+        if member.status in ("left", "kicked"):
+            await update.message.reply_text(f"ℹ️ *{target.full_name}* مو موجود في المجموعة أصلاً.", parse_mode="Markdown")
+            return
+    except TelegramError:
+        pass
     try:
         await context.bot.ban_chat_member(chat_id, target.id)
         await context.bot.unban_chat_member(chat_id, target.id)
@@ -4091,6 +4126,9 @@ async def do_enable_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
         return
     chat_id = update.effective_chat.id
+    if _welcome_enabled.get(chat_id, True) is True:
+        await update.message.reply_text("ℹ️ رسائل الترحيب مفعّلة مسبقاً.")
+        return
     _welcome_enabled[chat_id] = True
     save_data()
     await update.message.reply_text("✅ تم تفعيل رسائل الترحيب بالأعضاء الجدد.")
@@ -4101,6 +4139,9 @@ async def do_disable_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
         return
     chat_id = update.effective_chat.id
+    if _welcome_enabled.get(chat_id, True) is False:
+        await update.message.reply_text("ℹ️ رسائل الترحيب معطّلة مسبقاً.")
+        return
     _welcome_enabled[chat_id] = False
     save_data()
     await update.message.reply_text("❌ تم تعطيل رسائل الترحيب.")
@@ -4196,23 +4237,30 @@ async def media_handler_audio(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _check_media_restriction(update, context, "audio")
 
 
+_MEDIA_TYPE_NAMES = {
+    "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
+    "sticker": "الستيكرات", "animation": "الصور المتحركة",
+    "voice": "الرسائل الصوتية", "audio": "الموسيقى",
+}
+
+
 def _make_restrict_cmd(media_type: str):
     async def _restrict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_admin(update, context):
             await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
             return
         chat_id = update.effective_chat.id
+        restricted = _media_restrictions.get(chat_id, set())
+        label = _MEDIA_TYPE_NAMES.get(media_type, media_type)
+        if media_type in restricted:
+            await update.message.reply_text(f"ℹ️ {label} معطّلة مسبقاً في هذه المجموعة.")
+            return
         if chat_id not in _media_restrictions:
             _media_restrictions[chat_id] = set()
         _media_restrictions[chat_id].add(media_type)
         save_data()
-        type_names = {
-            "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
-            "sticker": "الستيكرات", "animation": "الصور المتحركة",
-            "voice": "الرسائل الصوتية", "audio": "الموسيقى",
-        }
         await update.message.reply_text(
-            f"🚫 تم تعطيل {type_names.get(media_type, media_type)} في المجموعة.\n"
+            f"🚫 تم تعطيل {label} في المجموعة.\n"
             f"_الأعضاء المميزون والمشرفون مستثنون._"
         )
     return _restrict
@@ -4224,15 +4272,14 @@ def _make_allow_cmd(media_type: str):
             await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
             return
         chat_id = update.effective_chat.id
-        if chat_id in _media_restrictions:
-            _media_restrictions[chat_id].discard(media_type)
+        restricted = _media_restrictions.get(chat_id, set())
+        label = _MEDIA_TYPE_NAMES.get(media_type, media_type)
+        if media_type not in restricted:
+            await update.message.reply_text(f"ℹ️ {label} مسموح بها أصلاً في هذه المجموعة.")
+            return
+        _media_restrictions[chat_id].discard(media_type)
         save_data()
-        type_names = {
-            "photo": "الصور", "video": "الفيديوهات", "document": "الملفات",
-            "sticker": "الستيكرات", "animation": "الصور المتحركة",
-            "voice": "الرسائل الصوتية", "audio": "الموسيقى",
-        }
-        await update.message.reply_text(f"✅ تم السماح بـ{type_names.get(media_type, media_type)} في المجموعة.")
+        await update.message.reply_text(f"✅ تم السماح بـ{label} في المجموعة.")
     return _allow
 
 
@@ -4267,6 +4314,9 @@ async def do_vip_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         await update.message.reply_text("⚠️ رد على رسالة العضو اللي تبيه مميزاً.")
         return
+    if target.id in _vip_users.get(chat_id, set()):
+        await update.message.reply_text(f"ℹ️ *{target.first_name}* مميز مسبقاً.", parse_mode="Markdown")
+        return
     if chat_id not in _vip_users:
         _vip_users[chat_id] = set()
     _vip_users[chat_id].add(target.id)
@@ -4287,8 +4337,10 @@ async def do_vip_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         await update.message.reply_text("⚠️ رد على رسالة العضو اللي تبي تنزّله من المميزين.")
         return
-    if chat_id in _vip_users:
-        _vip_users[chat_id].discard(target.id)
+    if target.id not in _vip_users.get(chat_id, set()):
+        await update.message.reply_text(f"ℹ️ *{target.first_name}* مو مميز أصلاً.", parse_mode="Markdown")
+        return
+    _vip_users[chat_id].discard(target.id)
     save_data()
     await update.message.reply_text(f"✅ تم تنزيل {target.first_name} من قائمة المميزين.")
 
@@ -4325,6 +4377,10 @@ async def do_restrict_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
         return
     chat_id = update.effective_chat.id
+    current = _media_restrictions.get(chat_id, set())
+    if current == _ALL_MEDIA_TYPES:
+        await update.message.reply_text("ℹ️ جميع الوسائط معطّلة مسبقاً في هذه المجموعة.")
+        return
     _media_restrictions[chat_id] = set(_ALL_MEDIA_TYPES)
     save_data()
     await update.message.reply_text(
@@ -4341,6 +4397,9 @@ async def do_allow_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ هذا الأمر للمشرفين فقط.")
         return
     chat_id = update.effective_chat.id
+    if not _media_restrictions.get(chat_id):
+        await update.message.reply_text("ℹ️ ما في أي قيود على الوسائط في هذه المجموعة أصلاً.")
+        return
     _media_restrictions[chat_id] = set()
     save_data()
     await update.message.reply_text(
