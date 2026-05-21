@@ -342,17 +342,14 @@ _pending_api_key_input: set = set()
 # مشرفو البوت — يمكنهم استخدام البوت بالخاص {user_id}
 _bot_admins: set = set()
 
-# المجموعات المسموح بها صراحةً {int chat_id}
-_allowed_chat_ids: set = set()
-
-# يوزرنيمات أصحاب المجموعات المسموحة {"username" بدون @}
-_allowed_group_owner_usernames: set = set()
-
-# مجموعات المالك المكتشفة تلقائياً {chat_id}
+# المجموعات النشطة المكتشفة تلقائياً {chat_id}
 _owner_known_chats: set = set()
 
 # أسماء المحادثات المعروفة {chat_id: title}
 _known_chat_names: dict = {}
+
+# يوزرنيمات المجموعات العامة {chat_id: username}
+_known_chat_usernames: dict = {}
 
 # حالة الذكاء الاصطناعي لكل مجموعة {chat_id: bool}  — الافتراضي True
 _ai_enabled_chats: dict = {}
@@ -493,11 +490,10 @@ def save_data():
                 str(cid): {str(uid): u for uid, u in users.items()}
                 for cid, users in _session_stats.items()
             },
-            "allowed_chat_ids": list(_allowed_chat_ids),
             "bot_admins": list(_bot_admins),
-            "allowed_group_owner_usernames": list(_allowed_group_owner_usernames),
             "owner_known_chats": list(_owner_known_chats),
             "known_chat_names": {str(k): v for k, v in _known_chat_names.items()},
+            "known_chat_usernames": {str(k): v for k, v in _known_chat_usernames.items()},
             "ai_enabled_chats": {str(k): v for k, v in _ai_enabled_chats.items()},
             "ai_daily_limit": {str(k): v for k, v in _ai_daily_limit.items()},
             "ai_daily_usage": {str(k): v for k, v in _ai_daily_usage.items()},
@@ -528,11 +524,10 @@ def load_data():
         for cid_str, users in data.get("session_stats", {}).items():
             _session_stats[int(cid_str)] = {int(uid): u for uid, u in users.items()}
         # المجموعات والمشرفون
-        _allowed_chat_ids.update(int(x) for x in data.get("allowed_chat_ids", []))
         _bot_admins.update(int(x) for x in data.get("bot_admins", []))
-        _allowed_group_owner_usernames.update(data.get("allowed_group_owner_usernames", []))
         _owner_known_chats.update(int(x) for x in data.get("owner_known_chats", []))
         _known_chat_names.update({int(k): v for k, v in data.get("known_chat_names", {}).items()})
+        _known_chat_usernames.update({int(k): v for k, v in data.get("known_chat_usernames", {}).items()})
         # إعدادات الذكاء الاصطناعي
         _ai_enabled_chats.update({int(k): v for k, v in data.get("ai_enabled_chats", {}).items()})
         _ai_daily_limit.update({int(k): v for k, v in data.get("ai_daily_limit", {}).items()})
@@ -1450,17 +1445,6 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ⚙️ لوحة الإعدادات — للمالك فقط
 # ============================================================
 
-def is_chat_allowed(chat_id: int, sender_username: str = None) -> bool:
-    """يتحقق إذا كانت المجموعة مسموحاً بها للعمل فيها."""
-    if chat_id in _owner_known_chats:
-        return True
-    if chat_id in _allowed_chat_ids:
-        return True
-    if sender_username:
-        clean = sender_username.lower().lstrip("@")
-        if clean in _allowed_group_owner_usernames:
-            return True
-    return False
 
 
 def is_ai_allowed_for_chat(chat_id: int) -> tuple:
@@ -1534,7 +1518,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔑 مفاتيح Gemini API", callback_data="settings_api_keys")],
             [InlineKeyboardButton("👥 مشرفو البوت", callback_data="settings_admins")],
-            [InlineKeyboardButton("🏘 المجموعات المسموحة", callback_data="settings_groups")],
+            [InlineKeyboardButton("🏘 المجموعات النشطة", callback_data="settings_groups")],
             [InlineKeyboardButton("🤖 إعدادات الذكاء", callback_data="settings_ai")],
             [InlineKeyboardButton("💬 إعدادات حفظ الردود", callback_data="settings_history")],
             [InlineKeyboardButton("📚 إعدادات السشنات", callback_data="settings_sessions")],
@@ -1600,88 +1584,36 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
     # ── لوحة المجموعات ──
     # ═══════════════════════════════════════
     if data == "settings_groups":
-        lines = [
-            "🏘 *المجموعات المسموحة*\n",
-            "✅ _مجموعاتك تعمل تلقائياً_\n",
-        ]
-        rows = []
-        if _allowed_chat_ids:
-            lines.append("*بالمعرّف (Chat ID):*")
-            for cid in sorted(_allowed_chat_ids):
-                name = _known_chat_names.get(cid, str(cid))
-                lines.append(f"• {name}")
-                rows.append([InlineKeyboardButton(f"🗑 {name}", callback_data=f"settings_del_grp:{cid}")])
-        if _allowed_group_owner_usernames:
-            lines.append("\n*بيوزرنيم المالك:*")
-            for uname in sorted(_allowed_group_owner_usernames):
-                lines.append(f"• @{uname}")
-                rows.append([InlineKeyboardButton(f"🗑 @{uname}", callback_data=f"settings_del_grpu:{uname}")])
-        if not _allowed_chat_ids and not _allowed_group_owner_usernames:
-            lines.append("_لا توجد مجموعات مضافة_")
-        rows.append([InlineKeyboardButton("➕ إضافة مجموعة", callback_data="settings_add_group")])
-        rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
-        await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
+        active = sorted(_owner_known_chats)
+        lines = ["🏘 *المجموعات النشطة*\n"]
+        if active:
+            lines.append(f"📊 إجمالي المجموعات: *{len(active)}*\n")
+        else:
+            lines.append("_لا توجد مجموعات نشطة بعد_")
+        buttons = []
+        for cid in active:
+            name = _known_chat_names.get(cid, str(cid))
+            username = _known_chat_usernames.get(cid)
+            if username:
+                buttons.append([InlineKeyboardButton(f"🏘 {name}", url=f"https://t.me/{username}")])
+            else:
+                buttons.append([InlineKeyboardButton(f"🏘 {name}", callback_data=f"settings_grp_info:{cid}")])
+        buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
+        await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
         await query.answer()
         return
 
-    if data == "settings_add_group":
-        _pending_settings_input[query.from_user.id] = {"type": "add_group"}
-        await query.answer()
-        await query.message.edit_text(
-            "🏘 *إضافة مجموعة*\n\n"
-            "أرسل أحد الخيارين:\n\n"
-            "① **معرّف المجموعة** (رقم سالب) — مثل:\n`-1001234567890`\n\n"
-            "② **يوزرنيم مالك المجموعة** — مثل:\n`@username`\n\n"
-            "_(الخيار الثاني يسمح لجميع مجموعات هذا الشخص)_",
-            parse_mode="Markdown",
-        )
-        return
-
-    if data.startswith("settings_del_grp:"):
+    if data.startswith("settings_grp_info:"):
         cid = int(data.split(":")[1])
-        _allowed_chat_ids.discard(cid)
-        _known_chat_names.pop(cid, None)
-        save_data()
-        await query.answer("🗑 تم حذف المجموعة.")
-        lines = ["🏘 *المجموعات المسموحة*\n", "✅ _مجموعاتك تعمل تلقائياً_\n"]
-        rows = []
-        for c in sorted(_allowed_chat_ids):
-            n = _known_chat_names.get(c, str(c))
-            rows.append([InlineKeyboardButton(f"🗑 {n}", callback_data=f"settings_del_grp:{c}")])
-        for u in sorted(_allowed_group_owner_usernames):
-            rows.append([InlineKeyboardButton(f"🗑 @{u}", callback_data=f"settings_del_grpu:{u}")])
-        rows.append([InlineKeyboardButton("➕ إضافة مجموعة", callback_data="settings_add_group")])
-        rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
-        try:
-            await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
-        except Exception:
-            pass
-        return
-
-    if data.startswith("settings_del_grpu:"):
-        uname = data.split(":")[1]
-        _allowed_group_owner_usernames.discard(uname)
-        await query.answer("🗑 تم حذف الصلاحية.")
-        lines = ["🏘 *المجموعات المسموحة*\n", "✅ _مجموعاتك تعمل تلقائياً_\n"]
-        rows = []
-        for c in sorted(_allowed_chat_ids):
-            n = _known_chat_names.get(c, str(c))
-            rows.append([InlineKeyboardButton(f"🗑 {n}", callback_data=f"settings_del_grp:{c}")])
-        for u in sorted(_allowed_group_owner_usernames):
-            rows.append([InlineKeyboardButton(f"🗑 @{u}", callback_data=f"settings_del_grpu:{u}")])
-        rows.append([InlineKeyboardButton("➕ إضافة مجموعة", callback_data="settings_add_group")])
-        rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="settings_main")])
-        try:
-            await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
-        except Exception:
-            pass
+        name = _known_chat_names.get(cid, str(cid))
+        await query.answer(f"🆔 {name}\nID: {cid}", show_alert=True)
         return
 
     # ═══════════════════════════════════════
     # ── لوحة إعدادات الذكاء ──
     # ═══════════════════════════════════════
     if data == "settings_ai":
-        all_ai_chats = _owner_known_chats | _allowed_chat_ids
+        all_ai_chats = set(_owner_known_chats)
         lines = ["🤖 *إعدادات الذكاء الاصطناعي*\n"]
         rows = []
         if all_ai_chats:
@@ -3977,24 +3909,9 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
     chat = update.effective_chat
 
-    # ── التحقق من صلاحية المجموعة وحدود الذكاء ──
+    # ── التحقق من حدود الذكاء ──
     if chat and chat.type != "private":
         chat_id_check = chat.id
-        sender_uname = user.username if user else None
-
-        if not is_chat_allowed(chat_id_check, sender_uname):
-            # تحقق حي: هل المالك عضو في هذه المجموعة؟
-            try:
-                member = await context.bot.get_chat_member(chat_id_check, OWNER_CHAT_ID)
-                if member.status in ("administrator", "creator", "member"):
-                    _owner_known_chats.add(chat_id_check)
-                    if chat.title:
-                        _known_chat_names[chat_id_check] = chat.title
-                else:
-                    return
-            except Exception:
-                return
-
         ok, reason = is_ai_allowed_for_chat(chat_id_check)
         if not ok:
             if reason == "disabled":
@@ -4217,18 +4134,33 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else None
     chat = update.effective_chat
 
-    # ── تتبع معلومات المالك والمجموعات تلقائياً ──
+    # ── تتبع معلومات المالك ──
     if user_id == OWNER_CHAT_ID:
         if update.effective_user and update.effective_user.username and not _owner_username:
             _owner_username = update.effective_user.username
-        if chat and chat.type in ("group", "supergroup"):
-            _owner_known_chats.add(chat.id)
-            if chat.title:
-                _known_chat_names[chat.id] = chat.title
 
-    # ── تسجيل أسماء المجموعات المعروفة ──
-    if chat and chat.type in ("group", "supergroup") and chat.title:
-        _known_chat_names[chat.id] = chat.title
+    # ── تتبع المجموعات وإشعار المالك عند الاكتشاف الأول ──
+    if chat and chat.type in ("group", "supergroup"):
+        is_new_group = chat.id not in _owner_known_chats
+        _owner_known_chats.add(chat.id)
+        if chat.title:
+            _known_chat_names[chat.id] = chat.title
+        if chat.username:
+            _known_chat_usernames[chat.id] = chat.username
+        if is_new_group:
+            link_text = f"\n🔗 الرابط: https://t.me/{chat.username}" if chat.username else ""
+            try:
+                await context.bot.send_message(
+                    OWNER_CHAT_ID,
+                    f"🆕 *البوت نشط في مجموعة جديدة!*\n\n"
+                    f"📍 الاسم: {chat.title or 'غير معروف'}\n"
+                    f"🆔 المعرّف: `{chat.id}`"
+                    f"{link_text}",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+            save_data()
 
     # ── كاش بيانات المستخدمين (لدعم البحث بـ @يوزرنيم) ──
     if update.effective_user:
@@ -4242,14 +4174,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ============================================================
     if chat and chat.type == "private":
         if user_id != OWNER_CHAT_ID and user_id not in _bot_admins:
-            owner_url = f"https://t.me/{_owner_username}" if _owner_username else None
-            buttons = [[InlineKeyboardButton("📩 تواصل مع المالك", url=owner_url)]] if owner_url else []
             await update.message.reply_text(
                 "👋 *أهلاً بك!*\n\n"
-                "هذا البوت مخصص لإدارة مجموعات محددة.\n\n"
-                "إذا تريد تفعيل البوت في مجموعتك، تواصل مع مالك البوت "
-                "وسيضيف مجموعتك للقائمة 😊",
-                reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+                "أنا بوت مخصص للعمل في المجموعات.\n"
+                "أضفني لمجموعتك وسأكون سعيداً بمساعدتكم! 😊",
                 parse_mode="Markdown",
             )
             return
@@ -4273,31 +4201,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await update.message.reply_text("❗ أرسل رقم المعرّف (User ID) فقط، مثل: `123456789`", parse_mode="Markdown")
-                _pending_settings_input[user_id] = state
-            return
-
-        elif state["type"] == "add_group":
-            if val.lstrip("-").isdigit():
-                cid = int(val)
-                _allowed_chat_ids.add(cid)
-                save_data()
-                await update.message.reply_text(
-                    f"✅ تم إضافة المجموعة `{cid}` للقائمة المسموحة.",
-                    parse_mode="Markdown",
-                )
-            elif val.startswith("@"):
-                uname = val[1:].lower()
-                _allowed_group_owner_usernames.add(uname)
-                save_data()
-                await update.message.reply_text(
-                    f"✅ تم إضافة @{uname} كمالك مجموعة مسموحة.\n"
-                    "_جميع مجموعاته ستعمل مع البوت._",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.message.reply_text(
-                    "❗ أرسل معرّف المجموعة (رقم سالب) أو يوزرنيم المالك (@username)."
-                )
                 _pending_settings_input[user_id] = state
             return
 
@@ -4611,13 +4514,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _cid_fb = _chat_for_fb.id
         _allowed_fb = True
         if _chat_for_fb.type != "private":
-            _sender_uname_fb = update.effective_user.username if update.effective_user else None
-            if not is_chat_allowed(_cid_fb, _sender_uname_fb):
-                try:
-                    _m = await context.bot.get_chat_member(_cid_fb, OWNER_CHAT_ID)
-                    _allowed_fb = _m.status in ("administrator", "creator", "member")
-                except Exception:
-                    _allowed_fb = False
             ok_fb, _ = is_ai_allowed_for_chat(_cid_fb)
             if not ok_fb:
                 _allowed_fb = False
