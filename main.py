@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import html as _html_module
 from pymongo import MongoClient
@@ -1491,6 +1492,21 @@ async def is_admin_by_id(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_
         return member.status in ["administrator", "creator"]
     except TelegramError:
         return False
+
+
+async def _is_group_creator(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:
+    """يتحقق إذا المستخدم هو مالك (creator) هذه المجموعة تحديداً."""
+    try:
+        member = await context.bot.get_chat_member(chat_id, user_id)
+        return member.status == "creator"
+    except Exception:
+        return False
+
+
+def _is_whole_word(keyword: str, text: str) -> bool:
+    """يتحقق إذا الكلمة موجودة كلمة مستقلة وليس ضمن كلمة أخرى."""
+    words = re.split(r'[\s،.؟?!,،؛:()\[\]{}"\'«»\-_\u200c\u200d]+', text)
+    return keyword in words
 
 
 def arabic_error(e: Exception) -> str:
@@ -2986,8 +3002,9 @@ async def _apply_rate_limit_restriction(bot, chat_id: int, user_id: int, user_na
 
 
 async def do_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_CHAT_ID:
-        await update.message.reply_text("❌ هذا الأمر خاص بالمالك فقط.")
+    chat_id = update.effective_chat.id
+    if not await _is_group_creator(context, chat_id, update.effective_user.id):
+        await update.message.reply_text("❌ هذا الأمر خاص بمالك المجموعة فقط.")
         return
     target = await get_target_user_extended(update, context)
     if not target:
@@ -3004,8 +3021,9 @@ async def do_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def do_cancel_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_CHAT_ID:
-        await update.message.reply_text("❌ هذا الأمر خاص بالمالك فقط.")
+    chat_id = update.effective_chat.id
+    if not await _is_group_creator(context, chat_id, update.effective_user.id):
+        await update.message.reply_text("❌ هذا الأمر خاص بمالك المجموعة فقط.")
         return
     target = await get_target_user_extended(update, context)
     if not target:
@@ -3042,7 +3060,10 @@ async def handle_rate_limit_callback(update: Update, context: ContextTypes.DEFAU
     data = query.data
     owner_id = update.effective_user.id
 
-    if owner_id != OWNER_CHAT_ID:
+    # استخرج chat_id من البيانات للتحقق من أن المستخدم مالك تلك المجموعة
+    _rl_parts_check = data[5:].split("_") if (data.startswith("rl_c_") or data.startswith("rl_t_")) else []
+    _rl_chat_id_check = int(_rl_parts_check[1]) if len(_rl_parts_check) >= 2 else None
+    if _rl_chat_id_check and not await _is_group_creator(context, _rl_chat_id_check, owner_id):
         return
 
     if data.startswith("rl_c_"):
@@ -4821,7 +4842,7 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if _chat_id_call and _chat_id_call in _auto_replies:
             _call_text_lower = user_message.strip().lower()
             for _kw, _kw_reply in _auto_replies[_chat_id_call].items():
-                if _kw in _call_text_lower:
+                if _is_whole_word(_kw, _call_text_lower):
                     _admin_reply_for_name = _kw_reply
                     break
         if _admin_reply_for_name:
@@ -5413,7 +5434,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if replies:
             text_lower = text.lower()
             for keyword, auto_reply in replies.items():
-                if keyword in text_lower:
+                if _is_whole_word(keyword, text_lower):
                     await update.message.reply_text(auto_reply)
                     return
 
