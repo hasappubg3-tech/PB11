@@ -17,6 +17,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ChatMemberHandler,
     filters,
     ContextTypes,
 )
@@ -1478,6 +1479,8 @@ async def get_target_user_extended(update: Update, context: ContextTypes.DEFAULT
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if user_id == OWNER_CHAT_ID:
+        return True
     chat_id = update.effective_chat.id
     try:
         member = await context.bot.get_chat_member(chat_id, user_id)
@@ -1567,6 +1570,8 @@ async def profanity_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user
+    if user.id == OWNER_CHAT_ID:
+        return
     chat_id = update.effective_chat.id
     text = update.message.text
 
@@ -2517,6 +2522,9 @@ async def do_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
+    if target.id == OWNER_CHAT_ID:
+        await update.message.reply_text("🛡 لا يمكن تنفيذ الأمر على مالك البوت.")
+        return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
         await update.message.reply_text("⚠️ هذا مشرف، ما يصير تحظره.")
@@ -2567,6 +2575,9 @@ async def do_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = await get_target_user_extended(update, context)
     if not target:
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
+        return
+    if target.id == OWNER_CHAT_ID:
+        await update.message.reply_text("🛡 لا يمكن تنفيذ الأمر على مالك البوت.")
         return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
@@ -2628,6 +2639,9 @@ async def do_kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
         return
+    if target.id == OWNER_CHAT_ID:
+        await update.message.reply_text("🛡 لا يمكن تنفيذ الأمر على مالك البوت.")
+        return
     chat_id = update.effective_chat.id
     if await is_admin_by_id(context, chat_id, target.id):
         await update.message.reply_text("⚠️ هذا مشرف، ما يصير تطرده.")
@@ -2655,6 +2669,9 @@ async def do_warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = await get_target_user_extended(update, context)
     if not target:
         await update.message.reply_text("❗ رد على رسالة العضو أو اكتب @يوزرنيم بعد الأمر.")
+        return
+    if target.id == OWNER_CHAT_ID:
+        await update.message.reply_text("🛡 لا يمكن تنفيذ الأمر على مالك البوت.")
         return
     chat_id_check = update.effective_chat.id
     if await is_admin_by_id(context, chat_id_check, target.id):
@@ -2950,6 +2967,8 @@ async def _restore_rate_limit_task(bot, chat_id: int, user_id: int, window_secon
 
 
 async def _apply_rate_limit_restriction(bot, chat_id: int, user_id: int, user_name: str, window_seconds: int):
+    if user_id == OWNER_CHAT_ID:
+        return
     rl_key = f"{chat_id}_{user_id}"
     rl = _rate_limits.get(rl_key)
     if not rl or rl.get("restricted"):
@@ -4141,6 +4160,49 @@ async def show_my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 # 👋 دوال الترحيب بالأعضاء الجدد
 # ============================================================
+
+
+# ============================================================
+# 🛡 حماية مالك البوت — استعادة تلقائية عند الكتم أو الحظر
+# ============================================================
+
+async def handle_owner_protection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يراقب تغيّر حالة مالك البوت ويزيل أي قيود عليه تلقائياً."""
+    chat_member = update.chat_member
+    if not chat_member:
+        return
+
+    user = chat_member.new_chat_member.user
+    if user.id != OWNER_CHAT_ID:
+        return
+
+    chat_id = chat_member.chat.id
+    new_status = chat_member.new_chat_member.status
+
+    if new_status == "kicked" or new_status == "banned":
+        try:
+            await context.bot.unban_chat_member(chat_id, OWNER_CHAT_ID)
+        except Exception:
+            pass
+
+    elif new_status == "restricted":
+        member = chat_member.new_chat_member
+        can_send = getattr(member, "can_send_messages", True)
+        if not can_send:
+            try:
+                await context.bot.restrict_chat_member(
+                    chat_id,
+                    OWNER_CHAT_ID,
+                    ChatPermissions(
+                        can_send_messages=True,
+                        can_send_polls=True,
+                        can_send_other_messages=True,
+                        can_add_web_page_previews=True,
+                    ),
+                )
+            except Exception:
+                pass
+
 
 async def do_enable_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
@@ -5728,6 +5790,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rate_limit_callback, pattern=r"^rl_"))
     app.add_handler(CallbackQueryHandler(handle_stats_callback, pattern=r"^(statsperiod|statsuser):"))
     app.add_handler(CallbackQueryHandler(handle_help_callback, pattern=r"^help_"))
+    app.add_handler(ChatMemberHandler(handle_owner_protection, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_member))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.VIDEO, media_handler_video))
