@@ -3973,7 +3973,7 @@ def _period_label(period: str) -> str:
     }.get(period, "📊 الإحصائيات")
 
 
-def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
+def _build_top10_keyboard(stats: dict, chat_id: int, period: str, user_id: int) -> tuple:
     """يبني رسالة + أزرار عمودية لأفضل 10 مشاركين."""
     rows = _get_sorted_rows(stats, period)
     label = _period_label(period)
@@ -3981,7 +3981,7 @@ def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
     if not rows:
         text = f"{label}\n\n⚠️ لا توجد إحصائيات لهذه الفترة."
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")]
+            [InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:{user_id}:back")]
         ])
         return text, keyboard
 
@@ -3991,23 +3991,23 @@ def _build_top10_keyboard(stats: dict, chat_id: int, period: str) -> tuple:
         prefix = medals[i] if i < 3 else f"{i + 1}."
         btn_label = f"{prefix}  {row['name']}"
         buttons.append([
-            InlineKeyboardButton(btn_label, callback_data=f"statsuser:{chat_id}:{row['uid']}:{period}")
+            InlineKeyboardButton(btn_label, callback_data=f"statsuser:{chat_id}:{user_id}:{row['uid']}:{period}")
         ])
-    buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:back")])
+    buttons.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"statsperiod:{chat_id}:{user_id}:back")])
 
     text = f"<b>{label}</b>\n\nاضغط على اسم لعرض إحصائياته التفصيلية 👇"
     return text, InlineKeyboardMarkup(buttons)
 
 
-def _build_period_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+def _build_period_keyboard(chat_id: int, user_id: int) -> InlineKeyboardMarkup:
     """يبني لوحة اختيار الفترة الزمنية."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 الإحصائيات الكلية", callback_data=f"statsperiod:{chat_id}:all")],
+        [InlineKeyboardButton("📊 الإحصائيات الكلية", callback_data=f"statsperiod:{chat_id}:{user_id}:all")],
         [
-            InlineKeyboardButton("📅 آخر يوم",   callback_data=f"statsperiod:{chat_id}:today"),
-            InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:week"),
+            InlineKeyboardButton("📅 آخر يوم",   callback_data=f"statsperiod:{chat_id}:{user_id}:today"),
+            InlineKeyboardButton("📆 آخر أسبوع", callback_data=f"statsperiod:{chat_id}:{user_id}:week"),
         ],
-        [InlineKeyboardButton("🗓 آخر شهر",      callback_data=f"statsperiod:{chat_id}:month")],
+        [InlineKeyboardButton("🗓 آخر شهر",      callback_data=f"statsperiod:{chat_id}:{user_id}:month")],
     ])
 
 
@@ -4018,10 +4018,11 @@ async def show_group_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ هذا الأمر يعمل في المجموعات فقط.")
         return
     chat_id = chat.id
+    user_id = update.effective_user.id
     await update.message.reply_text(
         "📊 <b>إحصائيات الدراسة</b>\n\nاختر الفترة الزمنية:",
         parse_mode="HTML",
-        reply_markup=_build_period_keyboard(chat_id),
+        reply_markup=_build_period_keyboard(chat_id, user_id),
     )
 
 
@@ -4046,46 +4047,54 @@ async def handle_stats_callback(update: Update, context: ContextTypes.DEFAULT_TY
     """يعالج أزرار الإحصائيات: اختيار فترة، قائمة مشاركين، تفاصيل مستخدم."""
     query = update.callback_query
     data = query.data
-    await query.answer()
+    presser_id = query.from_user.id
 
-    # ── اختيار الفترة: statsperiod:{chat_id}:{period|back} ──
+    # ── اختيار الفترة: statsperiod:{chat_id}:{user_id}:{period|back} ──
     if data.startswith("statsperiod:"):
         parts = data.split(":")
         chat_id = int(parts[1])
-        period = parts[2]
+        owner_id = int(parts[2])
+        period = parts[3]
+        if presser_id != owner_id:
+            await query.answer("❌ هذه الأزرار خاصة بمن طلب الأمر فقط.", show_alert=True)
+            return
+        await query.answer()
         stats = _session_stats.get(chat_id, {})
         if period == "back":
             try:
                 await query.edit_message_text(
                     "📊 <b>إحصائيات الدراسة</b>\n\nاختر الفترة الزمنية:",
                     parse_mode="HTML",
-                    reply_markup=_build_period_keyboard(chat_id),
+                    reply_markup=_build_period_keyboard(chat_id, owner_id),
                 )
             except Exception:
                 pass
             return
-        text, keyboard = _build_top10_keyboard(stats, chat_id, period)
+        text, keyboard = _build_top10_keyboard(stats, chat_id, period, owner_id)
         try:
             await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
         except Exception:
             pass
         return
 
-    # ── تفاصيل مستخدم: statsuser:{chat_id}:{uid}:{period} ──
+    # ── تفاصيل مستخدم: statsuser:{chat_id}:{user_id}:{uid}:{period} ──
     if data.startswith("statsuser:"):
         parts = data.split(":")
         chat_id = int(parts[1])
-        uid = int(parts[2])
-        period = parts[3]
+        owner_id = int(parts[2])
+        uid = int(parts[3])
+        period = parts[4]
+        if presser_id != owner_id:
+            await query.answer("❌ هذه الأزرار خاصة بمن طلب الأمر فقط.", show_alert=True)
+            return
+        await query.answer()
         stats = _session_stats.get(chat_id, {})
         u = stats.get(uid)
         if not u:
             await query.answer("❌ لا توجد إحصائيات لهذا المستخدم.", show_alert=True)
             return
-        # إحصائيات الفترة المحددة
         rows = _get_sorted_rows(stats, period)
         user_row = next((r for r in rows if r["uid"] == uid), None)
-        # إحصائيات الكل لحساب الترتيب العام
         all_rows = _get_sorted_rows(stats, "all")
         rank_all = next((i + 1 for i, r in enumerate(all_rows) if r["uid"] == uid), "-")
         if user_row:
@@ -4111,7 +4120,7 @@ async def handle_stats_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"🌟 الترتيب العام: <b>#{rank_all}</b>"
         )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 رجوع للقائمة", callback_data=f"statsperiod:{chat_id}:{period}")]
+            [InlineKeyboardButton("🔙 رجوع للقائمة", callback_data=f"statsperiod:{chat_id}:{owner_id}:{period}")]
         ])
         try:
             await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
