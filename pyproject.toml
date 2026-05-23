@@ -1,10 +1,14 @@
 [project]
-name = "python-template"
+name = "amira-telegram-bot"
 version = "0.1.0"
-description = ""
+description = "Amira - Iraqi Study Group Telegram Bot"
 authors = ["Your Name <you@example.com>"]
 requires-python = ">=3.11"
 dependencies = [
     "google-genai>=1.70.0",
     "python-telegram-bot>=21.0",
+    "pymongo[srv]>=4.0",
+    "yt-dlp>=2026.3.17",
+    "pytubefix>=10.3.8",
+    "sift-stack-py",
 ]
