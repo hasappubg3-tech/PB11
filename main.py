@@ -531,7 +531,7 @@ def _get_mongo_col():
     global _mongo_client, _mongo_col
     if _mongo_col is not None:
         return _mongo_col
-    uri = os.environ.get("MONGODB_URI", "")
+    uri = os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URL") or os.environ.get("MONGO_URI", "")
     if not uri:
         logger.warning("⚠️ MONGODB_URI غير موجود — سيتم تخطي الحفظ.")
         return None
