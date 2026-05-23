@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|nbsp);")
+_HTML_ENTITIES = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&nbsp;": " "}
+
+
+def _clean_ai_reply(text: str) -> str:
+    """يزيل وسوم HTML وكيانات HTML من ردود الذكاء الاصطناعي حتى لا تظهر كنص."""
+    if not text:
+        return text
+    text = _HTML_TAG_RE.sub("", text)
+    text = _HTML_ENTITY_RE.sub(lambda m: _HTML_ENTITIES.get(m.group(), m.group()), text)
+    return text.strip()
+
 # ============================================================
 # 🤖 إعداد نموذج الذكاء الاصطناعي (Gemini) مع دعم تعدد المفاتيح
 # ============================================================
@@ -4944,7 +4957,7 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     max_output_tokens=8192,
                 ),
             )
-            reply = response.text.strip() if response.text else None
+            reply = _clean_ai_reply(response.text) if response.text else None
             if not reply:
                 raise ValueError("رد فارغ من الذكاء الاصطناعي")
         except Exception as e:
@@ -4955,7 +4968,7 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not reply:
         if ai_error is not None:
-            # إرسال تفاصيل الخطأ للمالك فقط دون الرد على الأعضاء
+            # إرسال تفاصيل الخطأ للمالك
             if _bot_app and OWNER_CHAT_ID:
                 try:
                     short_err = ai_error[:300]
@@ -4970,6 +4983,8 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception:
                     pass
+        # إبلاغ المستخدم بدل الصمت
+        await update.message.reply_text("ما قدرت أرد الحين، جرب مرة ثانية بعد شوية.")
         return
 
     if "##RUDE##" in reply:
@@ -5024,7 +5039,7 @@ async def bot_photo_response(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 max_output_tokens=8192,
             ),
         )
-        reply = response.text.strip() if response.text else None
+        reply = _clean_ai_reply(response.text) if response.text else None
         if not reply:
             raise ValueError("رد فارغ من الذكاء الاصطناعي")
     except Exception as e:
@@ -5064,7 +5079,7 @@ async def bot_reply_to_photo_response(update: Update, context: ContextTypes.DEFA
                 max_output_tokens=8192,
             ),
         )
-        reply = response.text.strip() if response.text else None
+        reply = _clean_ai_reply(response.text) if response.text else None
         if not reply:
             raise ValueError("رد فارغ من الذكاء الاصطناعي")
     except Exception as e:
