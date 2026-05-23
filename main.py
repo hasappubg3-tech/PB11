@@ -4855,13 +4855,12 @@ def _find_file(tmp_dir: str):
 
 
 # الـ clients مرتبة من الأنجح على السيرفرات للأقل نجاحاً
+# android_vr يشتغل بدون PO Token وهو الأنسب للسيرفرات
 _YT_CLIENTS = [
-    ["tv_embedded"],
-    ["ios"],
-    ["web_embedded"],
     ["android_vr"],
-    ["mweb"],
     ["android"],
+    ["mweb"],
+    ["web_creator"],
     ["web"],
 ]
 
@@ -4966,17 +4965,72 @@ def _download_via_invidious(url: str, audio_only: bool = False):
             logger.warning(f"فشل Invidious ({instance}): {e}")
             continue
     return None
+
+
+def _download_via_cobalt(url: str, audio_only: bool = False):
+    """cobalt.tools — fallback أخير، يشتغل من أي IP"""
+    try:
+        payload = json.dumps({
+            "url": url,
+            "downloadMode": "audio" if audio_only else "auto",
+            "videoQuality": "720",
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.cobalt.tools/",
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+
+        status = data.get("status")
+        download_url = data.get("url")
+        if status not in ("stream", "redirect", "tunnel") or not download_url:
+            logger.warning(f"cobalt.tools رجع: status={status}")
+            return None
+
+        ext = "m4a" if audio_only else "mp4"
+        tmp_dir = tempfile.mkdtemp()
+        out_path = os.path.join(tmp_dir, f"media.{ext}")
+        dl_req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        )
+        with urllib.request.urlopen(dl_req, timeout=120) as r, open(out_path, "wb") as f:
+            shutil.copyfileobj(r, f)
+
+        if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+            logger.info("✅ نجح التحميل عبر cobalt.tools")
+            return out_path
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"فشل cobalt.tools: {e}")
+    return None
 # ---------------------------------------------------------------
 
 
 def download_video_file(url: str):
     tmp_dir = tempfile.mkdtemp()
     output_path = os.path.join(tmp_dir, "video.%(ext)s")
+    # DASH format: فيديو + صوت منفصلين يُدمجان بـ ffmpeg
+    # 18 = muxed 360p (قديم، نادراً متاح الآن)
+    _VIDEO_FMT = (
+        "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]"
+        "/bestvideo[height<=480]+bestaudio"
+        "/134+140/133+140/160+140"
+        "/best[height<=480]"
+        "/best"
+    )
     for client in _YT_CLIENTS:
         ydl_opts = {
             **_YT_BASE_OPTS,
             "outtmpl": output_path,
-            "format": "18/best[ext=mp4][filesize<45M]/best[height<=720][filesize<45M]/best[filesize<45M]",
+            "format": _VIDEO_FMT,
             "merge_output_format": "mp4",
             "extractor_args": {"youtube": {"player_client": client}},
         }
@@ -4984,27 +5038,31 @@ def download_video_file(url: str):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(url, download=True)
             result = _find_file(tmp_dir)
-            if result:
-                logger.info(f"نجح تحميل الفيديو بـ {client}")
+            if result and os.path.getsize(result) > 0:
+                logger.info(f"✅ نجح تحميل الفيديو بـ {client}")
                 return result
         except Exception as e:
             logger.warning(f"فشل تحميل فيديو ({client}): {e}")
             _clear_dir(tmp_dir)
             continue
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    # fallback: Invidious
-    logger.info("محاولة التحميل عبر Invidious (fallback)...")
-    return _download_via_invidious(url, audio_only=False)
+    logger.info("محاولة التحميل عبر Invidious (fallback 1)...")
+    result = _download_via_invidious(url, audio_only=False)
+    if result:
+        return result
+    logger.info("محاولة التحميل عبر cobalt.tools (fallback 2)...")
+    return _download_via_cobalt(url, audio_only=False)
 
 
 def download_audio_file(url: str):
     tmp_dir = tempfile.mkdtemp()
     output_path = os.path.join(tmp_dir, "audio.%(ext)s")
+    _AUDIO_FMT = "140/bestaudio[ext=m4a]/bestaudio[filesize<45M]/bestaudio"
     for client in _YT_CLIENTS:
         ydl_opts = {
             **_YT_BASE_OPTS,
             "outtmpl": output_path,
-            "format": "140/bestaudio[ext=m4a]/bestaudio[filesize<45M]/18",
+            "format": _AUDIO_FMT,
             "max_filesize": 45 * 1024 * 1024,
             "extractor_args": {"youtube": {"player_client": client}},
         }
@@ -5012,17 +5070,20 @@ def download_audio_file(url: str):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(url, download=True)
             result = _find_file(tmp_dir)
-            if result:
-                logger.info(f"نجح تحميل الصوت بـ {client}")
+            if result and os.path.getsize(result) > 0:
+                logger.info(f"✅ نجح تحميل الصوت بـ {client}")
                 return result
         except Exception as e:
             logger.warning(f"فشل تحميل صوت ({client}): {e}")
             _clear_dir(tmp_dir)
             continue
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    # fallback: Invidious
-    logger.info("محاولة تحميل الصوت عبر Invidious (fallback)...")
-    return _download_via_invidious(url, audio_only=True)
+    logger.info("محاولة تحميل الصوت عبر Invidious (fallback 1)...")
+    result = _download_via_invidious(url, audio_only=True)
+    if result:
+        return result
+    logger.info("محاولة تحميل الصوت عبر cobalt.tools (fallback 2)...")
+    return _download_via_cobalt(url, audio_only=True)
 
 
 async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):

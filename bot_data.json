@@ -2,12 +2,16 @@
   "session_stats": {},
   "bot_admins": [],
   "owner_known_chats": [
-    -1002881771918
+    -1002881771918,
+    -1003513318748
   ],
   "known_chat_names": {
-    "-1002881771918": "كروب الأمير طلاب السادس اعدادي"
+    "-1002881771918": "كروب الأمير طلاب السادس اعدادي",
+    "-1003513318748": "كروب طلاب سادس علمي2026"
   },
-  "known_chat_usernames": {},
+  "known_chat_usernames": {
+    "-1003513318748": "lbwy33"
+  },
   "ai_enabled_chats": {},
   "ai_daily_limit": {},
   "ai_daily_usage": {},
