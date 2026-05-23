@@ -606,41 +606,52 @@ def _get_sessions_col():
     return _sessions_col
 
 
+def _build_save_dict() -> dict:
+    """يبني القاموس الكامل للبيانات جاهزاً للحفظ."""
+    return {
+        "session_stats": {
+            str(cid): {str(uid): u for uid, u in users.items()}
+            for cid, users in _session_stats.items()
+        },
+        "bot_admins": list(_bot_admins),
+        "owner_known_chats": list(_owner_known_chats),
+        "known_chat_names": {str(k): v for k, v in _known_chat_names.items()},
+        "known_chat_usernames": {str(k): v for k, v in _known_chat_usernames.items()},
+        "ai_enabled_chats": {str(k): v for k, v in _ai_enabled_chats.items()},
+        "ai_daily_limit": {str(k): v for k, v in _ai_daily_limit.items()},
+        "ai_daily_usage": {str(k): v for k, v in _ai_daily_usage.items()},
+        "max_sessions": _max_sessions,
+        "auto_replies": {str(k): v for k, v in _auto_replies.items()},
+        "history_enabled": _history_enabled,
+        "history_max_messages": _history_max_messages,
+        "history_expiry_minutes": _history_expiry_minutes,
+        "gemini_api_keys": list(_gemini_api_keys),
+        "group_gemini_keys": {str(k): v for k, v in _group_gemini_keys.items()},
+        "welcome_enabled": {str(k): v for k, v in _welcome_enabled.items()},
+        "media_restrictions": {str(k): list(v) for k, v in _media_restrictions.items()},
+        "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
+        "warn_data": {str(k): v for k, v in warn_data.items()},
+        "profanity_violations": {str(k): v for k, v in profanity_violations.items()},
+    }
+
+
 def save_data():
-    """يحفظ كل الإعدادات والإحصائيات في MongoDB."""
+    """يحفظ كل الإعدادات والإحصائيات — في MongoDB إن وُجد، وإلا في bot_data.json."""
+    data = _build_save_dict()
     col = _get_mongo_col()
-    if col is None:
-        return
-    try:
-        data = {
-            "_id": "bot_data",
-            "session_stats": {
-                str(cid): {str(uid): u for uid, u in users.items()}
-                for cid, users in _session_stats.items()
-            },
-            "bot_admins": list(_bot_admins),
-            "owner_known_chats": list(_owner_known_chats),
-            "known_chat_names": {str(k): v for k, v in _known_chat_names.items()},
-            "known_chat_usernames": {str(k): v for k, v in _known_chat_usernames.items()},
-            "ai_enabled_chats": {str(k): v for k, v in _ai_enabled_chats.items()},
-            "ai_daily_limit": {str(k): v for k, v in _ai_daily_limit.items()},
-            "ai_daily_usage": {str(k): v for k, v in _ai_daily_usage.items()},
-            "max_sessions": _max_sessions,
-            "auto_replies": {str(k): v for k, v in _auto_replies.items()},
-            "history_enabled": _history_enabled,
-            "history_max_messages": _history_max_messages,
-            "history_expiry_minutes": _history_expiry_minutes,
-            "gemini_api_keys": list(_gemini_api_keys),
-            "group_gemini_keys": {str(k): v for k, v in _group_gemini_keys.items()},
-            "welcome_enabled": {str(k): v for k, v in _welcome_enabled.items()},
-            "media_restrictions": {str(k): list(v) for k, v in _media_restrictions.items()},
-            "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
-            "warn_data": {str(k): v for k, v in warn_data.items()},
-            "profanity_violations": {str(k): v for k, v in profanity_violations.items()},
-        }
-        col.replace_one({"_id": "bot_data"}, data, upsert=True)
-    except Exception as e:
-        logger.warning(f"⚠️ فشل حفظ البيانات في MongoDB: {e}")
+    if col is not None:
+        try:
+            col.replace_one({"_id": "bot_data"}, {"_id": "bot_data", **data}, upsert=True)
+        except Exception as e:
+            logger.warning(f"⚠️ فشل حفظ البيانات في MongoDB: {e}")
+    else:
+        # احتياطي: الحفظ في bot_data.json
+        _local_path = os.path.join(os.path.dirname(__file__), "bot_data.json")
+        try:
+            with open(_local_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"⚠️ فشل حفظ البيانات في bot_data.json: {e}")
 
 
 def _load_from_dict(data: dict):
