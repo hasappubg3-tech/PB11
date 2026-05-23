@@ -208,6 +208,36 @@ def _is_invalid_key_error(e: Exception) -> bool:
     return any(kw in error_str for kw in _INVALID_KEY_KEYWORDS)
 
 
+def _is_transient_error(e: Exception) -> bool:
+    """يتحقق إذا الخطأ مؤقت ويستحق إعادة المحاولة (شبكة، سيرفر مؤقت، إلخ)."""
+    error_str = str(e).lower()
+    transient_kws = (
+        "timeout", "timed out", "connection", "network", "unavailable",
+        "internal server error", "500", "502", "503", "504",
+        "service unavailable", "overloaded", "try again",
+    )
+    return any(kw in error_str for kw in transient_kws)
+
+
+def _call_with_retry(client, model, contents, config, retries=2):
+    """يستدعي Gemini مع إعادة المحاولة للأخطاء المؤقتة."""
+    import time
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            result = client.models.generate_content(model=model, contents=contents, config=config)
+            return result
+        except Exception as e:
+            if _is_transient_error(e) and attempt < retries:
+                wait = 1.5 * (attempt + 1)
+                logger.warning(f"خطأ مؤقت، إعادة المحاولة بعد {wait}ث [{type(e).__name__}]: {e}")
+                time.sleep(wait)
+                last_exc = e
+            else:
+                raise
+    raise last_exc
+
+
 def generate_with_rotation(model, contents, config):
     """
     يولّد رداً من Gemini مع الأولوية للمفاتيح الأدنى رقماً.
@@ -226,7 +256,7 @@ def generate_with_rotation(model, contents, config):
         tried_indices.append(i)
         client = _make_gemini_client(_gemini_api_keys[i])
         try:
-            result = client.models.generate_content(model=model, contents=contents, config=config)
+            result = _call_with_retry(client, model, contents, config)
             gemini_client = client
             return result
         except Exception as e:
@@ -289,7 +319,7 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
         tried.append(i)
         client = _make_gemini_client(keys[i])
         try:
-            return client.models.generate_content(model=model, contents=contents, config=config)
+            return _call_with_retry(client, model, contents, config)
         except Exception as e:
             if _is_quota_error(e) or _is_invalid_key_error(e):
                 exhausted.add(i)
@@ -302,7 +332,7 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
             continue
         client = _make_gemini_client(keys[i])
         try:
-            result = client.models.generate_content(model=model, contents=contents, config=config)
+            result = _call_with_retry(client, model, contents, config)
             exhausted.discard(i)
             return result
         except Exception as e:
@@ -4983,8 +5013,6 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception:
                     pass
-        # إبلاغ المستخدم بدل الصمت
-        await update.message.reply_text("ما قدرت أرد الحين، جرب مرة ثانية بعد شوية.")
         return
 
     if "##RUDE##" in reply:
