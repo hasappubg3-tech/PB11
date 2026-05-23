@@ -4676,23 +4676,27 @@ def download_youtube_video(query: str):
 
 
 def search_youtube_titles(query: str):
-    try:
-        ydl_opts = {
-            "quiet": True,
-            "extract_flat": True,
-            "noplaylist": True,
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            if result and "entries" in result:
-                return [
-                    (e["title"], f"https://www.youtube.com/watch?v={e['id']}")
-                    for e in result["entries"]
-                    if e.get("title") and e.get("id")
-                ]
-    except Exception as e:
-        logger.warning(f"فشل البحث: {e}")
+    search_clients = [["tv_embedded"], ["ios"], ["web_embedded"], ["android"], ["mweb"]]
+    for client in search_clients:
+        try:
+            ydl_opts = {
+                **_YT_BASE_OPTS,
+                "extract_flat": True,
+                "extractor_args": {"youtube": {"player_client": client}},
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                result = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                if result and "entries" in result:
+                    entries = [
+                        (e["title"], f"https://www.youtube.com/watch?v={e['id']}")
+                        for e in result["entries"]
+                        if e.get("title") and e.get("id")
+                    ]
+                    if entries:
+                        return entries
+        except Exception as e:
+            logger.warning(f"فشل البحث ({client}): {e}")
+            continue
     return []
 
 
@@ -4761,7 +4765,35 @@ def _find_file(tmp_dir: str):
     return None
 
 
-_YT_CLIENTS = [["ios"], ["web_creator"], ["mweb"], ["android"], ["tv"]]
+# الـ clients مرتبة من الأنجح على السيرفرات للأقل نجاحاً
+_YT_CLIENTS = [
+    ["tv_embedded"],
+    ["ios"],
+    ["web_embedded"],
+    ["android_vr"],
+    ["mweb"],
+    ["android"],
+    ["web"],
+]
+
+# خيارات مشتركة تساعد على تجاوز حجب السيرفر
+_YT_BASE_OPTS = {
+    "quiet": True,
+    "noplaylist": True,
+    "nocheckcertificate": True,
+    "geo_bypass": True,
+    "socket_timeout": 45,
+    "http_headers": {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.youtube.com/",
+    },
+}
 
 
 def download_video_file(url: str):
@@ -4769,13 +4801,11 @@ def download_video_file(url: str):
     output_path = os.path.join(tmp_dir, "video.%(ext)s")
     for client in _YT_CLIENTS:
         ydl_opts = {
-            "quiet": True,
+            **_YT_BASE_OPTS,
             "outtmpl": output_path,
-            "format": "18/best[ext=mp4][filesize<45M]/best[filesize<45M]",
+            "format": "18/best[ext=mp4][filesize<45M]/best[height<=720][filesize<45M]/best[filesize<45M]",
             "merge_output_format": "mp4",
-            "noplaylist": True,
             "extractor_args": {"youtube": {"player_client": client}},
-            "socket_timeout": 30,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -4797,13 +4827,11 @@ def download_audio_file(url: str):
     output_path = os.path.join(tmp_dir, "audio.%(ext)s")
     for client in _YT_CLIENTS:
         ydl_opts = {
-            "quiet": True,
+            **_YT_BASE_OPTS,
             "outtmpl": output_path,
             "format": "140/bestaudio[ext=m4a]/bestaudio[filesize<45M]/18",
-            "noplaylist": True,
             "max_filesize": 45 * 1024 * 1024,
             "extractor_args": {"youtube": {"player_client": client}},
-            "socket_timeout": 30,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
