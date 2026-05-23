@@ -1,10 +1,13 @@
 {
   "session_stats": {},
-  "allowed_chat_ids": [],
   "bot_admins": [],
-  "allowed_group_owner_usernames": [],
-  "owner_known_chats": [],
-  "known_chat_names": {},
+  "owner_known_chats": [
+    -1002881771918
+  ],
+  "known_chat_names": {
+    "-1002881771918": "كروب الأمير طلاب السادس اعدادي"
+  },
+  "known_chat_usernames": {},
   "ai_enabled_chats": {},
   "ai_daily_limit": {},
   "ai_daily_usage": {},
@@ -31,5 +34,11 @@
     "AIzaSyAX6eW4MdKzM7SyKgmmYVDYcEwnHLp-LOM",
     "AIzaSyC8KoOg9fzsICZ_X0L2BHHAJgdqSoyTA20",
     "AIzaSyA8BskY0z9GI0ZZoAh1-i6JdEM9aG6t42w"
-  ]
+  ],
+  "group_gemini_keys": {},
+  "welcome_enabled": {},
+  "media_restrictions": {},
+  "vip_users": {},
+  "warn_data": {},
+  "profanity_violations": {}
 }

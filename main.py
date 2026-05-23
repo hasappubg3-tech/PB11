@@ -4777,12 +4777,15 @@ _YT_CLIENTS = [
 ]
 
 # خيارات مشتركة تساعد على تجاوز حجب السيرفر
+_YT_COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yt_cookies.txt")
+
 _YT_BASE_OPTS = {
     "quiet": True,
     "noplaylist": True,
     "nocheckcertificate": True,
     "geo_bypass": True,
     "socket_timeout": 45,
+    **({"cookiefile": _YT_COOKIES_FILE} if os.path.isfile(_YT_COOKIES_FILE) else {}),
     "http_headers": {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
