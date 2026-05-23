@@ -600,54 +600,58 @@ def save_data():
         logger.warning(f"⚠️ فشل حفظ البيانات في MongoDB: {e}")
 
 
-def load_data():
-    """يحمّل الإعدادات والإحصائيات من MongoDB عند بدء التشغيل."""
+def _load_from_dict(data: dict):
+    """يُطبّق بيانات محمّلة (من MongoDB أو bot_data.json) على المتغيرات العالمية."""
     global _max_sessions, _history_enabled, _history_max_messages, _history_expiry_minutes
+    for cid_str, users in data.get("session_stats", {}).items():
+        _session_stats[int(cid_str)] = {int(uid): u for uid, u in users.items()}
+    _bot_admins.update(int(x) for x in data.get("bot_admins", []))
+    _owner_known_chats.update(int(x) for x in data.get("owner_known_chats", []))
+    _known_chat_names.update({int(k): v for k, v in data.get("known_chat_names", {}).items()})
+    _known_chat_usernames.update({int(k): v for k, v in data.get("known_chat_usernames", {}).items()})
+    _ai_enabled_chats.update({int(k): v for k, v in data.get("ai_enabled_chats", {}).items()})
+    _ai_daily_limit.update({int(k): v for k, v in data.get("ai_daily_limit", {}).items()})
+    _ai_daily_usage.update({int(k): v for k, v in data.get("ai_daily_usage", {}).items()})
+    _max_sessions = data.get("max_sessions", _max_sessions)
+    _history_enabled = data.get("history_enabled", _history_enabled)
+    _history_max_messages = data.get("history_max_messages", _history_max_messages)
+    _history_expiry_minutes = data.get("history_expiry_minutes", _history_expiry_minutes)
+    _auto_replies.update({int(k): v for k, v in data.get("auto_replies", {}).items()})
+    for key in data.get("gemini_api_keys", []):
+        if key and key not in _gemini_api_keys:
+            _gemini_api_keys.append(key)
+    for k, v in data.get("group_gemini_keys", {}).items():
+        _group_gemini_keys[int(k)] = list(v)
+    _welcome_enabled.update({int(k): v for k, v in data.get("welcome_enabled", {}).items()})
+    for k, v in data.get("media_restrictions", {}).items():
+        _media_restrictions[int(k)] = set(v)
+    for k, v in data.get("vip_users", {}).items():
+        _vip_users[int(k)] = set(v)
+    warn_data.update({k: v for k, v in data.get("warn_data", {}).items()})
+    profanity_violations.update({k: v for k, v in data.get("profanity_violations", {}).items()})
+
+
+def load_data():
+    """يحمّل الإعدادات والإحصائيات من MongoDB عند بدء التشغيل، أو من bot_data.json كاحتياط."""
     col = _get_mongo_col()
     if col is None:
+        # لا يوجد اتصال بـ MongoDB — نحمّل من الملف المحلي إن وُجد
+        _local_path = os.path.join(os.path.dirname(__file__), "bot_data.json")
+        if os.path.exists(_local_path):
+            try:
+                with open(_local_path, "r", encoding="utf-8") as _f:
+                    _local_data = json.load(_f)
+                _load_from_dict(_local_data)
+                logger.info("✅ تم تحميل البيانات من bot_data.json (وضع احتياطي).")
+            except Exception as _e:
+                logger.warning(f"⚠️ فشل تحميل bot_data.json: {_e}")
         return
     try:
         data = col.find_one({"_id": "bot_data"})
         if not data:
             logger.info("ℹ️ لا توجد بيانات محفوظة في MongoDB بعد.")
             return
-        # إحصائيات السشنات
-        for cid_str, users in data.get("session_stats", {}).items():
-            _session_stats[int(cid_str)] = {int(uid): u for uid, u in users.items()}
-        # المجموعات والمشرفون
-        _bot_admins.update(int(x) for x in data.get("bot_admins", []))
-        _owner_known_chats.update(int(x) for x in data.get("owner_known_chats", []))
-        _known_chat_names.update({int(k): v for k, v in data.get("known_chat_names", {}).items()})
-        _known_chat_usernames.update({int(k): v for k, v in data.get("known_chat_usernames", {}).items()})
-        # إعدادات الذكاء الاصطناعي
-        _ai_enabled_chats.update({int(k): v for k, v in data.get("ai_enabled_chats", {}).items()})
-        _ai_daily_limit.update({int(k): v for k, v in data.get("ai_daily_limit", {}).items()})
-        _ai_daily_usage.update({int(k): v for k, v in data.get("ai_daily_usage", {}).items()})
-        # إعدادات عامة
-        _max_sessions = data.get("max_sessions", _max_sessions)
-        _history_enabled = data.get("history_enabled", _history_enabled)
-        _history_max_messages = data.get("history_max_messages", _history_max_messages)
-        _history_expiry_minutes = data.get("history_expiry_minutes", _history_expiry_minutes)
-        # الردود التلقائية
-        _auto_replies.update({int(k): v for k, v in data.get("auto_replies", {}).items()})
-        # مفاتيح Gemini الأساسية
-        for key in data.get("gemini_api_keys", []):
-            if key and key not in _gemini_api_keys:
-                _gemini_api_keys.append(key)
-        # مفاتيح Gemini الخاصة بالمجموعات
-        for k, v in data.get("group_gemini_keys", {}).items():
-            _group_gemini_keys[int(k)] = list(v)
-        # نظام الترحيب
-        _welcome_enabled.update({int(k): v for k, v in data.get("welcome_enabled", {}).items()})
-        # تقييد الوسائط
-        for k, v in data.get("media_restrictions", {}).items():
-            _media_restrictions[int(k)] = set(v)
-        # الأعضاء المميزون
-        for k, v in data.get("vip_users", {}).items():
-            _vip_users[int(k)] = set(v)
-        # عدادات الإنذارات ومخالفات الشتائم
-        warn_data.update({k: v for k, v in data.get("warn_data", {}).items()})
-        profanity_violations.update({k: v for k, v in data.get("profanity_violations", {}).items()})
+        _load_from_dict(data)
         logger.info("✅ تم تحميل البيانات من MongoDB بنجاح.")
     except Exception as e:
         logger.warning(f"⚠️ فشل تحميل البيانات من MongoDB: {e}")
@@ -5759,18 +5763,20 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main():
+    global gemini_client
     load_data()
 
-    errors = []
+    # إعادة تهيئة gemini_client بعد تحميل المفاتيح من قاعدة البيانات
+    if _gemini_api_keys and gemini_client is None:
+        gemini_client = _make_gemini_client(_gemini_api_keys[0])
+
     if not BOT_TOKEN:
-        errors.append("TELEGRAM_BOT_TOKEN")
-    if not _gemini_api_keys:
-        errors.append("GEMINI_API_KEY (أو GEMINI_API_KEY_1 .. GEMINI_API_KEY_10)")
-    if errors:
-        for var in errors:
-            logger.error(f"❌ متغير البيئة مفقود: {var}")
-        logger.error("⛔ البوت لن يعمل. أضف المتغيرات الناقصة وأعد التشغيل.")
+        logger.error("❌ متغير البيئة مفقود: TELEGRAM_BOT_TOKEN")
+        logger.error("⛔ البوت لن يعمل. أضف TELEGRAM_BOT_TOKEN وأعد التشغيل.")
         return
+
+    if not _gemini_api_keys:
+        logger.warning("⚠️ لم يتم العثور على أي مفتاح Gemini — ميزة الذكاء الاصطناعي معطّلة.")
 
     async def _periodic_save():
         """يحفظ البيانات تلقائياً كل 5 دقائق."""
