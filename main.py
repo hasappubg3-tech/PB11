@@ -4700,6 +4700,42 @@ def search_youtube_titles(query: str):
     return []
 
 
+def _build_results_keyboard(user_id: int, results: list, show_more: bool) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(f"{i+1}. {title[:55]}", callback_data=f"yt_pick_{user_id}_{i}")]
+        for i, (title, _) in enumerate(results)
+    ]
+    if show_more:
+        buttons.append([InlineKeyboardButton("🔄 عرض نتائج أخرى", callback_data=f"yt_more_{user_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def search_youtube_titles_more(query: str) -> list:
+    """يجلب النتائج من 6 إلى 10 (الصفحة الثانية)"""
+    search_clients = [["tv_embedded"], ["ios"], ["web_embedded"], ["android"], ["mweb"]]
+    for client in search_clients:
+        try:
+            ydl_opts = {
+                **_YT_BASE_OPTS,
+                "extract_flat": True,
+                "extractor_args": {"youtube": {"player_client": client}},
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                result = ydl.extract_info(f"ytsearch10:{query}", download=False)
+                if result and "entries" in result:
+                    entries = [
+                        (e["title"], f"https://www.youtube.com/watch?v={e['id']}")
+                        for e in result["entries"][5:]
+                        if e.get("title") and e.get("id")
+                    ]
+                    if entries:
+                        return entries
+        except Exception as e:
+            logger.warning(f"فشل البحث الإضافي ({client}): {e}")
+            continue
+    return []
+
+
 async def bot_youtube_response(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     user = update.effective_user
     first_name = user.first_name or "أخي"
@@ -4710,12 +4746,63 @@ async def bot_youtube_response(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     context.bot_data[f"yt_{user.id}"] = results
+    context.bot_data[f"yt_query_{user.id}"] = query
+    context.bot_data[f"yt_more_used_{user.id}"] = False
 
-    buttons = [
-        [InlineKeyboardButton(f"{i+1}. {title[:55]}", callback_data=f"yt_pick_{user.id}_{i}")]
-        for i, (title, _) in enumerate(results)
-    ]
-    await msg.edit_text("اختر الفيديو:", reply_markup=InlineKeyboardMarkup(buttons))
+    keyboard = _build_results_keyboard(user.id, results, show_more=True)
+    await msg.edit_text("اختر الفيديو:", reply_markup=keyboard)
+
+
+async def handle_yt_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    user_id = int(parts[2])
+
+    if query.from_user.id != user_id:
+        await query.answer("هذا الاختيار مو إلك.", show_alert=True)
+        return
+
+    search_query = context.bot_data.get(f"yt_query_{user_id}")
+    if not search_query:
+        await query.edit_message_text("انتهت الجلسة، جرب البحث من جديد.")
+        return
+
+    await query.edit_message_text("🔍 أبحث عن نتائج أخرى...")
+    more_results = await asyncio.get_running_loop().run_in_executor(
+        None, search_youtube_titles_more, search_query
+    )
+    if not more_results:
+        current = context.bot_data.get(f"yt_{user_id}", [])
+        keyboard = _build_results_keyboard(user_id, current, show_more=False)
+        await query.edit_message_text("ما لقيت نتائج إضافية.\n\nاختر من النتائج السابقة:", reply_markup=keyboard)
+        return
+
+    context.bot_data[f"yt_{user_id}"] = more_results
+    context.bot_data[f"yt_more_used_{user_id}"] = True
+
+    keyboard = _build_results_keyboard(user_id, more_results, show_more=False)
+    await query.edit_message_text("اختر الفيديو:", reply_markup=keyboard)
+
+
+async def handle_yt_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    user_id = int(parts[2])
+
+    if query.from_user.id != user_id:
+        await query.answer("هذا الاختيار مو إلك.", show_alert=True)
+        return
+
+    results = context.bot_data.get(f"yt_{user_id}")
+    if not results:
+        await query.edit_message_text("انتهت الجلسة، جرب البحث من جديد.")
+        return
+
+    more_used = context.bot_data.get(f"yt_more_used_{user_id}", False)
+    keyboard = _build_results_keyboard(user_id, results, show_more=not more_used)
+    await query.edit_message_text("اختر الفيديو:", reply_markup=keyboard)
 
 
 async def handle_yt_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4741,7 +4828,8 @@ async def handle_yt_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             InlineKeyboardButton("🎬 فيديو", callback_data=f"yt_fmt_{user_id}_video"),
             InlineKeyboardButton("🎵 صوت فقط", callback_data=f"yt_fmt_{user_id}_audio"),
-        ]
+        ],
+        [InlineKeyboardButton("🔙 رجوع للنتائج", callback_data=f"yt_back_{user_id}")],
     ]
     await query.edit_message_text(
         f"اخترت: {title}\n\nكيف تريده؟",
@@ -4870,6 +4958,10 @@ async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     title, url = choice
     await query.edit_message_text("⏳ جاري التحميل...")
 
+    back_btn = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔙 رجوع للنتائج", callback_data=f"yt_back_{user_id}")]]
+    )
+
     if fmt == "video":
         file_path = await asyncio.get_running_loop().run_in_executor(None, download_video_file, url)
         if file_path:
@@ -4878,7 +4970,10 @@ async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
             shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
         else:
-            await query.edit_message_text("ما قدرت أحمّل الفيديو، جرب مرة ثانية.")
+            await query.edit_message_text(
+                "ما قدرت أحمّل الفيديو، جرب فيديو آخر.",
+                reply_markup=back_btn,
+            )
     else:
         file_path = await asyncio.get_running_loop().run_in_executor(None, download_audio_file, url)
         if file_path:
@@ -4887,7 +4982,10 @@ async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
             shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
         else:
-            await query.edit_message_text("ما قدرت أحمّل الصوت، جرب مرة ثانية.")
+            await query.edit_message_text(
+                "ما قدرت أحمّل الصوت، جرب فيديو آخر.",
+                reply_markup=back_btn,
+            )
 
 
 def _get_user_history(user_id: int) -> list:
@@ -5883,6 +5981,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_yt_pick, pattern=r"^yt_pick_"))
     app.add_handler(CallbackQueryHandler(handle_yt_format, pattern=r"^yt_fmt_"))
+    app.add_handler(CallbackQueryHandler(handle_yt_more, pattern=r"^yt_more_"))
+    app.add_handler(CallbackQueryHandler(handle_yt_back, pattern=r"^yt_back_"))
     app.add_handler(CallbackQueryHandler(handle_key_status_callback, pattern=r"^key_status_"))
     app.add_handler(CallbackQueryHandler(handle_session_callback, pattern=r"^sess_"))
     app.add_handler(CallbackQueryHandler(handle_settings_callback, pattern=r"^settings_"))
