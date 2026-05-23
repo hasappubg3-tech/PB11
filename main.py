@@ -9,6 +9,7 @@ import asyncio
 import threading
 import tempfile
 import shutil
+import urllib.request
 from datetime import datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
@@ -4887,6 +4888,87 @@ _YT_BASE_OPTS = {
 }
 
 
+# ---- Invidious fallback (يشتغل عندما يحجب YouTube الـ IP) ----
+_INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.privacyredirect.com",
+    "https://yt.dragonarchives.net",
+    "https://invidious.io",
+]
+
+_INV_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+
+def _yt_video_id(url: str):
+    m = re.search(r"(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})", url)
+    return m.group(1) if m else None
+
+
+def _inv_fetch(instance: str, video_id: str):
+    api = f"{instance}/api/v1/videos/{video_id}?fields=formatStreams,adaptiveFormats"
+    req = urllib.request.Request(api, headers=_INV_HEADERS)
+    with urllib.request.urlopen(req, timeout=12) as r:
+        return json.loads(r.read())
+
+
+def _inv_download_url(direct_url: str, out_path: str) -> bool:
+    req = urllib.request.Request(direct_url, headers=_INV_HEADERS)
+    with urllib.request.urlopen(req, timeout=90) as r, open(out_path, "wb") as f:
+        shutil.copyfileobj(r, f)
+    return os.path.isfile(out_path) and os.path.getsize(out_path) > 0
+
+
+def _download_via_invidious(url: str, audio_only: bool = False):
+    video_id = _yt_video_id(url)
+    if not video_id:
+        return None
+    for instance in _INVIDIOUS_INSTANCES:
+        try:
+            data = _inv_fetch(instance, video_id)
+            if audio_only:
+                formats = [
+                    f for f in data.get("adaptiveFormats", [])
+                    if "audio" in f.get("type", "") and f.get("url")
+                ]
+                formats.sort(key=lambda x: int(x.get("bitrate", 0)), reverse=True)
+                if not formats:
+                    continue
+                direct_url = formats[0]["url"]
+                ext = "m4a"
+            else:
+                streams = [
+                    s for s in data.get("formatStreams", [])
+                    if s.get("container") == "mp4" and s.get("url")
+                ]
+                streams.sort(
+                    key=lambda x: int(x.get("resolution", "0p").replace("p", "") or 0),
+                    reverse=True,
+                )
+                if not streams:
+                    continue
+                direct_url = streams[0]["url"]
+                ext = "mp4"
+
+            tmp_dir = tempfile.mkdtemp()
+            out_path = os.path.join(tmp_dir, f"media.{ext}")
+            if _inv_download_url(direct_url, out_path):
+                logger.info(f"نجح التحميل عبر Invidious ({instance})")
+                return out_path
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"فشل Invidious ({instance}): {e}")
+            continue
+    return None
+# ---------------------------------------------------------------
+
+
 def download_video_file(url: str):
     tmp_dir = tempfile.mkdtemp()
     output_path = os.path.join(tmp_dir, "video.%(ext)s")
@@ -4910,7 +4992,9 @@ def download_video_file(url: str):
             _clear_dir(tmp_dir)
             continue
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    return None
+    # fallback: Invidious
+    logger.info("محاولة التحميل عبر Invidious (fallback)...")
+    return _download_via_invidious(url, audio_only=False)
 
 
 def download_audio_file(url: str):
@@ -4936,7 +5020,9 @@ def download_audio_file(url: str):
             _clear_dir(tmp_dir)
             continue
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    return None
+    # fallback: Invidious
+    logger.info("محاولة تحميل الصوت عبر Invidious (fallback)...")
+    return _download_via_invidious(url, audio_only=True)
 
 
 async def handle_yt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
