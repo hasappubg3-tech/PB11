@@ -348,7 +348,7 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
 
 
 # البرومبت اللي يحدد شخصية البوت — تقدر تعدله
-GEMINI_SYSTEM_PROMPT = (
+_GEMINI_SYSTEM_BASE = (
     "أنت بوت اسمها اميرة تشتغلين في مجموعة تيليغرام عراقية. "
     "شخصيتك رزينة وواثقة من نفسك، تتكلمين بلهجة عراقية هادئة ومحترمة، وفيها قدر بسيط من الدفء الطبيعي بدون مبالغة أو تصنع. "
     "كوني مباشرة وواضحة في ردودك، ولا تتلاطفين زيادة عن اللزوم. "
@@ -358,12 +358,63 @@ GEMINI_SYSTEM_PROMPT = (
     "أو الأمر بالصمت بأسلوب وقح (اسكت، اخرس) — اكتب فقط وحرفياً: ##RUDE## "
     "لا تكتب أي شيء آخر غير هذا النص. "
     "⚠️ مهم: العبارات التي تعبّر عن مشاعر سلبية بدون إهانة مباشرة مثل (أكرهك، ما أحبك، زعلان منك، مو ناعجني) لا تعتبر إهانة ولا تستدعي ##RUDE## — رد عليها بشكل طبيعي. "
-    
     "إذا سألوك سؤال (رياضيات، معلومة، أو مواد السادس العلمي بشكل عام خاصتا الاحياء وفصل الوراثة وباقي المواد التي تخص السادس العلمي) — جاوب الجواب الصحيح المتوافق مع منهج السادس العلمي العراقي ياريت يكون الجواب من نفس المنهج وليس من مصدر اخر في حال كان السؤال عن احد مواد السادس الرياضيات او الكيمياء او الفيزياء او الانكليزي او الاسلامية والخ، اما اذا سؤال عام فجاوب من اي مصدر تحب بشكل مباشر وواضح بلهجة عراقية هادئة. "
-    "إذا كلموك بدون سؤال — رد بإيجاز واحترام بدون مبالغة. "
-    "بخصوص طول الرد: اجاوب بشكل معتدل، لا قصير جداً ولا مطوّل، وضّح الفكرة الأساسية والخطوات الرئيسية بإيجاز والناتج النهائي. تجنب الشرح الزائد والتكرار. "
+    "إذا كلموك بدون سؤال — رد بجملة أو جملتين فقط. "
+    "⚠️ طول الرد مهم جداً: اجعلي ردودك قصيرة ومباشرة دائماً. "
+    "جملة أو جملتان تكفيان في أغلب الأحوال. "
+    "استثناء وحيد: إذا كان السؤال يتطلب حلاً تفصيلياً (مثل مسألة رياضية أو شرح درس) — وضّحي الخطوات الأساسية بإيجاز فقط بدون حشو أو تكرار. "
+    "لا تكرري المعلومة، لا تختمي بعبارات فضفاضة، لا تطيلي بدون داعٍ. "
     "ما تذكرين إنك ذكاء اصطناعي أو بوت، تصرفي طبيعي."
 )
+
+# الأنماط الكاشفة لجنس المستخدم
+_FEMALE_PATTERNS = [
+    "أنا بنت", "انا بنت", "أنا انثى", "انا انثى", "أنا أنثى", "انا أنثى",
+    "أنا مو ولد", "انا مو ولد", "أنا طالبة", "انا طالبة",
+    "بنت مو ولد", "أنثى مو ذكر", "انثى مو ذكر",
+    "انا بنه", "أنا بنه",
+]
+_MALE_PATTERNS = [
+    "أنا ولد", "انا ولد", "أنا ذكر", "انا ذكر",
+    "أنا طالب", "انا طالب", "أنا مو بنت", "انا مو بنت",
+    "أنا رجال", "انا رجال", "ولد مو بنت", "ذكر مو أنثى",
+    "انا ذكر مو أنثى", "أنا ذكر مو انثى",
+]
+
+
+def _detect_gender_from_text(text: str):
+    """يكتشف الجنس من الرسالة — يعيد 'male' أو 'female' أو None."""
+    t = text.strip()
+    for p in _FEMALE_PATTERNS:
+        if p in t:
+            return "female"
+    for p in _MALE_PATTERNS:
+        if p in t:
+            return "male"
+    return None
+
+
+def _get_system_prompt(user_id: int) -> str:
+    """يبني الـ system prompt مع إضافة سياق جنس المستخدم."""
+    gender = _user_genders.get(user_id)
+    if gender == "female":
+        gender_note = (
+            " [ملاحظة مهمة: المستخدم الذي تتحدثين معه الآن أنثى."
+            " تكلمي معها بصيغة المؤنث وبأسلوب أكثر لطفاً ودفئاً من المعتاد.]"
+        )
+    elif gender == "male":
+        gender_note = (
+            " [ملاحظة: المستخدم الذي تتحدثين معه ذكر — استخدمي صيغة المذكر.]"
+        )
+    else:
+        gender_note = (
+            " [في حال لم تعرفي جنس المستخدم، استخدمي صيغة المذكر افتراضياً.]"
+        )
+    return _GEMINI_SYSTEM_BASE + gender_note
+
+
+# للتوافق مع أي مكان يستخدم الاسم القديم مباشرة
+GEMINI_SYSTEM_PROMPT = _GEMINI_SYSTEM_BASE + " [في حال لم تعرفي جنس المستخدم، استخدمي صيغة المذكر افتراضياً.]"
 
 
 # ============================================================
@@ -445,6 +496,9 @@ _bot_admins: set = set()
 
 # المجموعات النشطة المكتشفة تلقائياً {chat_id}
 _owner_known_chats: set = set()
+
+# جنس المستخدمين المحفوظ بشكل دائم {user_id: "male" | "female"}
+_user_genders: dict = {}
 
 # أسماء المحادثات المعروفة {chat_id: title}
 _known_chat_names: dict = {}
@@ -633,6 +687,7 @@ def _build_save_dict() -> dict:
         "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
         "warn_data": {str(k): v for k, v in warn_data.items()},
         "profanity_violations": {str(k): v for k, v in profanity_violations.items()},
+        "user_genders": {str(k): v for k, v in _user_genders.items()},
     }
 
 
@@ -684,6 +739,7 @@ def _load_from_dict(data: dict):
         _vip_users[int(k)] = set(v)
     warn_data.update({k: v for k, v in data.get("warn_data", {}).items()})
     profanity_violations.update({k: v for k, v in data.get("profanity_violations", {}).items()})
+    _user_genders.update({int(k): v for k, v in data.get("user_genders", {}).items()})
 
 
 def load_data():
@@ -5260,6 +5316,12 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── الردود المحفوظة تأتي أولاً (أسرع ولا تستهلك API) ──
     reply = get_smart_fallback(first_name, user_message)
 
+    # ── كشف جنس المستخدم وحفظه إن صرّح به ──
+    detected_gender = _detect_gender_from_text(user_message)
+    if detected_gender and _user_genders.get(user_id) != detected_gender:
+        _user_genders[user_id] = detected_gender
+        save_data()
+
     if not reply:
         contents = _build_contents_with_history(user_id, user_message)
         ai_error = None
@@ -5270,7 +5332,7 @@ async def bot_call_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 model="gemini-2.5-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=GEMINI_SYSTEM_PROMPT,
+                    system_instruction=_get_system_prompt(user_id),
                     max_output_tokens=8192,
                 ),
             )
@@ -5350,7 +5412,7 @@ async def bot_photo_response(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 types.Part.from_text(text=prompt),
             ],
             config=types.GenerateContentConfig(
-                system_instruction=GEMINI_SYSTEM_PROMPT,
+                system_instruction=_get_system_prompt(user.id),
                 max_output_tokens=8192,
             ),
         )
@@ -5390,7 +5452,7 @@ async def bot_reply_to_photo_response(update: Update, context: ContextTypes.DEFA
                 types.Part.from_text(text=prompt),
             ],
             config=types.GenerateContentConfig(
-                system_instruction=GEMINI_SYSTEM_PROMPT,
+                system_instruction=_get_system_prompt(user.id),
                 max_output_tokens=8192,
             ),
         )
