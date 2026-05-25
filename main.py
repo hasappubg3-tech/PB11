@@ -255,6 +255,12 @@ _INVALID_KEY_KEYWORDS = (
     "invalid api key",
     "api key not valid",
     "api_key_expired",
+    "consumer_suspended",
+    "permission_denied",
+    "has been suspended",
+    "account suspended",
+    "key has been",
+    "disabled",
 )
 
 
