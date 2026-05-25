@@ -141,8 +141,11 @@ _gemini_api_key = _gemini_api_keys[0] if _gemini_api_keys else None
 # معرّف حساب المالك الشخصي على تيليغرام لاستقبال الإشعارات
 OWNER_CHAT_ID = 7305367169
 
-# المفاتيح المستنفدة حالياً — يتم إضافة رقم المفتاح هنا عند استنفاده
+# المفاتيح المستنفدة حالياً (حصة يومية) — تُمسح بعد كل restart لأنها تُشحن من جديد
 _exhausted_key_indices: set = set()
+
+# المفاتيح الميتة نهائياً (منتهية/موقوفة) — تُحفظ على القرص ولا تُعاد التجربة أبداً
+_dead_keys: set = set()  # يخزن قيمة المفتاح نفسه (string)
 
 # مرجع عالمي للـ application وحلقة الأحداث لإرسال الإشعارات من داخل الكود المتزامن
 _bot_app = None
@@ -341,10 +344,12 @@ def generate_with_rotation(model, contents, config):
                 _schedule_update_status_message()
             elif _is_invalid_key_error(e):
                 logger.warning(
-                    f"مفتاح Gemini رقم {i + 1} منتهي الصلاحية أو غير صالح، جاري البحث عن مفتاح آخر..."
+                    f"مفتاح Gemini رقم {i + 1} منتهي الصلاحية أو غير صالح نهائياً، جاري البحث عن مفتاح آخر..."
                 )
                 _exhausted_key_indices.add(i)
+                _dead_keys.add(_gemini_api_keys[i])
                 _schedule_update_status_message()
+                save_data()
             else:
                 logger.error(f"خطأ غير متوقع من مفتاح رقم {i + 1} [{type(e).__name__}]: {e}")
                 raise
@@ -359,11 +364,16 @@ def generate_with_rotation(model, contents, config):
             result = client.models.generate_content(model=model, contents=contents, config=config)
             logger.info(f"مفتاح Gemini رقم {i + 1} انشحن وعاد للعمل!")
             _exhausted_key_indices.discard(i)
+            _dead_keys.discard(_gemini_api_keys[i])
             _schedule_update_status_message()
             gemini_client = client
             return result
         except Exception as e:
-            if _is_quota_error(e) or _is_invalid_key_error(e):
+            if _is_quota_error(e):
+                last_exception = e
+            elif _is_invalid_key_error(e):
+                _dead_keys.add(_gemini_api_keys[i])
+                save_data()
                 last_exception = e
             else:
                 logger.error(f"خطأ غير متوقع من مفتاح رقم {i + 1} [{type(e).__name__}]: {e}")
@@ -385,6 +395,8 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
 
     exhausted = _group_exhausted_keys.setdefault(chat_id, set())
 
+    grp_dead = _group_dead_keys.setdefault(chat_id, set())
+
     tried = []
     for i in range(len(keys)):
         if i in exhausted:
@@ -394,8 +406,12 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
         try:
             return _call_with_retry(client, model, contents, config)
         except Exception as e:
-            if _is_quota_error(e) or _is_invalid_key_error(e):
+            if _is_quota_error(e):
                 exhausted.add(i)
+            elif _is_invalid_key_error(e):
+                exhausted.add(i)
+                grp_dead.add(keys[i])
+                save_data()
             else:
                 raise
 
@@ -407,9 +423,14 @@ def generate_with_rotation_for_group(chat_id: int, model: str, contents, config)
         try:
             result = _call_with_retry(client, model, contents, config)
             exhausted.discard(i)
+            grp_dead.discard(keys[i])
             return result
         except Exception as e:
-            if _is_quota_error(e) or _is_invalid_key_error(e):
+            if _is_quota_error(e):
+                last_exc = e
+            elif _is_invalid_key_error(e):
+                grp_dead.add(keys[i])
+                save_data()
                 last_exc = e
             else:
                 raise
@@ -557,6 +578,9 @@ _group_gemini_keys: dict = {}
 
 # مؤشرات المفاتيح المستنفدة لكل مجموعة {chat_id: set()}
 _group_exhausted_keys: dict = {}
+
+# المفاتيح الميتة نهائياً لكل مجموعة {chat_id: set(key_strings)}
+_group_dead_keys: dict = {}
 
 # المالك ينتظر إدخال مفاتيح API لمجموعة محددة {user_id: chat_id}
 _pending_group_api_key_input: dict = {}
@@ -755,7 +779,9 @@ def _build_save_dict() -> dict:
         "history_max_messages": _history_max_messages,
         "history_expiry_minutes": _history_expiry_minutes,
         "gemini_api_keys": list(_gemini_api_keys),
+        "dead_keys": list(_dead_keys),
         "group_gemini_keys": {str(k): v for k, v in _group_gemini_keys.items()},
+        "group_dead_keys": {str(k): list(v) for k, v in _group_dead_keys.items()},
         "welcome_enabled": {str(k): v for k, v in _welcome_enabled.items()},
         "media_restrictions": {str(k): list(v) for k, v in _media_restrictions.items()},
         "vip_users": {str(k): list(v) for k, v in _vip_users.items()},
@@ -804,8 +830,25 @@ def _load_from_dict(data: dict):
     for key in data.get("gemini_api_keys", []):
         if key and key not in _gemini_api_keys:
             _gemini_api_keys.append(key)
+    # تحميل المفاتيح الميتة وتعليمها مباشرة كـ exhausted حتى لا تُجرَّب من جديد
+    for key in data.get("dead_keys", []):
+        if key:
+            _dead_keys.add(key)
+    for i, key in enumerate(_gemini_api_keys):
+        if key in _dead_keys:
+            _exhausted_key_indices.add(i)
     for k, v in data.get("group_gemini_keys", {}).items():
         _group_gemini_keys[int(k)] = list(v)
+    # تحميل المفاتيح الميتة للمجموعات وتعليمها كـ exhausted
+    for k, v in data.get("group_dead_keys", {}).items():
+        cid = int(k)
+        dead_set = set(v)
+        _group_dead_keys[cid] = dead_set
+        keys = _group_gemini_keys.get(cid, [])
+        exhausted_set = _group_exhausted_keys.setdefault(cid, set())
+        for idx, key in enumerate(keys):
+            if key in dead_set:
+                exhausted_set.add(idx)
     _welcome_enabled.update({int(k): v for k, v in data.get("welcome_enabled", {}).items()})
     for k, v in data.get("media_restrictions", {}).items():
         _media_restrictions[int(k)] = set(v)
