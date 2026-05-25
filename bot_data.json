@@ -50,13 +50,47 @@
     "AIzaSyCpLXFQs5mxdh9t1ueYjbPo2Oi85Wxw2ao",
     "AIzaSyAttcKsY9VhDmHLhPerPZ0XuhLVznXKnGA",
     "AIzaSyDThYglNp_LEXOteVybZng7gqWqyjZThCs",
-    "AIzaSyBmRr1cf1Uvh8eAL4nX8lE1Vex63sr7gp8"
+    "AIzaSyBmRr1cf1Uvh8eAL4nX8lE1Vex63sr7gp8",
+    "AIzaSyB4STYheitmnLNZ-2U9a1J4Fp5ih2dJfjs"
+  ],
+  "dead_keys": [
+    "AIzaSyAttcKsY9VhDmHLhPerPZ0XuhLVznXKnGA",
+    "AIzaSyDrhZO82qX3xnxskXUczvBXkDfAlLLCg7E",
+    "AIzaSyDtXlPjXhYwlER9F4UI730J5Q2oDhThcxM",
+    "AIzaSyD_JGJ2-lVlunjs1kMGzQUXqfeF2apxuM0",
+    "AIzaSyC0VV8wTd-zJFOK7aN2w6uWu_TIaah3vu8",
+    "AIzaSyCqg5jCnqBdtmB-m8xZIYYEzn5La8Mj9xo",
+    "AIzaSyBvdr_xVCWgN4vLF0zFHF530Aoxt95aBWQ",
+    "AIzaSyCIdYZ16fi4fbUhJTzJmB-6kJAD51mc7f8",
+    "AIzaSyCpLXFQs5mxdh9t1ueYjbPo2Oi85Wxw2ao",
+    "AIzaSyCtcQa9HrXHThVaZOY1qdnjnfaTb4YB7H4",
+    "AIzaSyA8BskY0z9GI0ZZoAh1-i6JdEM9aG6t42w",
+    "AIzaSyBslsvCebxSDIshGxP-yE2pO9s6KD7KloA",
+    "AIzaSyD1HtQB6OMVVwXoHHxdQKTuItY-pM79buw",
+    "AIzaSyCK_sj7tkfliZ3KqKbFazrESqejFhkDreg",
+    "AIzaSyCvjk3z59TtvsOgWQ2aZ88-YepD9WoCCEA",
+    "AIzaSyB5hnKW1RHxJlnFkDOwHwYIza_I5sKLwwg",
+    "AIzaSyCHss1MA-f7tThS_mE3KGrGGkD_ogzbrBg",
+    "AIzaSyBmRr1cf1Uvh8eAL4nX8lE1Vex63sr7gp8",
+    "AIzaSyBqguy_y0l_1EShUsnZaxLfRgp-kk-fdH8",
+    "AIzaSyAX6eW4MdKzM7SyKgmmYVDYcEwnHLp-LOM",
+    "AIzaSyCpE2uk-Ih-EVQcK30hYuqJ78xGevXn0to",
+    "AIzaSyCQ1o0e__KUY25dV7qOnjKFUp7vnbdTmcQ",
+    "AIzaSyD-_mkWpCkAeEIhZy05A90nOq1WEpXkAfM",
+    "AIzaSyB02QuR2anZPLtZ58X5oW4ewxskibn245k",
+    "AIzaSyDO6Pb4dR2hctfUT8vEYToA0c1XDsAJrO0",
+    "AIzaSyC8KoOg9fzsICZ_X0L2BHHAJgdqSoyTA20",
+    "AIzaSyA6bXKxo7p1QD6qjg0mGmx6G-7CCEBnejQ",
+    "AIzaSyDThYglNp_LEXOteVybZng7gqWqyjZThCs"
   ],
   "group_gemini_keys": {},
+  "group_dead_keys": {},
   "welcome_enabled": {},
   "media_restrictions": {},
   "vip_users": {},
   "warn_data": {},
   "profanity_violations": {},
-  "user_genders": {}
+  "user_genders": {
+    "7305367169": "male"
+  }
 }
