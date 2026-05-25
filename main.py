@@ -5715,18 +5715,23 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         grp_list = _group_gemini_keys.setdefault(target_cid, [])
         _group_exhausted_keys.pop(target_cid, None)
         added = 0
+        skipped = 0
         for key in new_keys:
             if key not in grp_list:
                 grp_list.append(key)
                 added += 1
+            else:
+                skipped += 1
         save_data()
         grp_name = _known_chat_names.get(target_cid, str(target_cid))
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🔑 إدارة المفاتيح", callback_data=f"settings_grp_ai:{target_cid}"),
         ]])
+        skip_note = f"\n⚠️ تم تجاهل *{skipped}* مفتاح موجود مسبقاً." if skipped else ""
         await update.message.reply_text(
             f"✅ تم إضافة *{added}* مفتاح لـ *{grp_name}*\n"
-            f"📊 إجمالي مفاتيحها الآن: *{len(grp_list)}*",
+            f"📊 إجمالي مفاتيحها الآن: *{len(grp_list)}*"
+            f"{skip_note}",
             reply_markup=keyboard,
             parse_mode="Markdown",
         )
@@ -5743,17 +5748,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _pending_api_key_input.add(user_id)
             return
         added = 0
+        skipped = 0
         for key in new_keys:
             if key not in _gemini_api_keys:
                 _gemini_api_keys.append(key)
                 added += 1
+            else:
+                skipped += 1
         save_data()
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🔑 عرض المفاتيح", callback_data="settings_api_keys"),
         ]])
+        skip_note = f"\n⚠️ تم تجاهل {skipped} مفتاح موجود مسبقاً." if skipped else ""
         await update.message.reply_text(
             f"✅ تم إضافة {added} مفتاح جديد.\n"
-            f"📊 إجمالي المفاتيح الآن: {len(_gemini_api_keys)}",
+            f"📊 إجمالي المفاتيح الآن: {len(_gemini_api_keys)}"
+            f"{skip_note}",
             reply_markup=keyboard,
         )
         return
