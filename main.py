@@ -40,13 +40,79 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _HTML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|nbsp);")
 _HTML_ENTITIES = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&nbsp;": " "}
 
+_LATEX_GREEK = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+    "epsilon": "ε", "theta": "θ", "lambda": "λ", "mu": "μ",
+    "pi": "π", "sigma": "σ", "omega": "ω", "phi": "φ",
+    "psi": "ψ", "rho": "ρ", "tau": "τ", "nu": "ν",
+    "xi": "ξ", "eta": "η", "zeta": "ζ", "kappa": "κ",
+    "Delta": "Δ", "Gamma": "Γ", "Sigma": "Σ", "Omega": "Ω",
+    "Theta": "Θ", "Pi": "Π", "Lambda": "Λ", "Phi": "Φ",
+}
+_LATEX_SYMBOLS = {
+    r"\cdot": "·", r"\times": "×", r"\div": "÷",
+    r"\pm": "±", r"\mp": "∓",
+    r"\leq": "≤", r"\geq": "≥", r"\neq": "≠", r"\ne": "≠",
+    r"\approx": "≈", r"\equiv": "≡", r"\sim": "~",
+    r"\infty": "∞", r"\in": "∈", r"\notin": "∉",
+    r"\subset": "⊂", r"\subseteq": "⊆",
+    r"\cup": "∪", r"\cap": "∩",
+    r"\to": "→", r"\rightarrow": "→", r"\leftarrow": "←",
+    r"\Rightarrow": "⇒", r"\Leftarrow": "⇐", r"\Leftrightarrow": "⇔",
+    r"\ldots": "...", r"\cdots": "...", r"\%": "%",
+    r"\circ": "°", r"\degree": "°",
+}
+
+
+def _strip_latex(text: str) -> str:
+    """يحوّل رموز LaTeX إلى نص عادي مقروء."""
+    # \frac{a}{b} → (a/b)
+    text = re.sub(r'\\frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1/\2)', text)
+    # \sqrt[n]{x} → n√(x)
+    text = re.sub(r'\\sqrt\[([^\]]+)\]\{([^{}]+)\}', r'\1√(\2)', text)
+    # \sqrt{x} → √(x)
+    text = re.sub(r'\\sqrt\{([^{}]+)\}', r'√(\1)', text)
+    text = re.sub(r'\\sqrt\s+(\S+)', r'√\1', text)
+    # Greek letters
+    for name, sym in _LATEX_GREEK.items():
+        text = text.replace(f'\\{name}', sym)
+    # Symbols
+    for latex, uni in _LATEX_SYMBOLS.items():
+        text = text.replace(latex, uni)
+    # \text{content} → content
+    text = re.sub(r'\\text\{([^{}]*)\}', r'\1', text)
+    # \operatorname{name} → name
+    text = re.sub(r'\\operatorname\{([^{}]*)\}', r'\1', text)
+    # Remove size/bracket modifiers: \left, \right, \big, etc.
+    text = re.sub(r'\\(?:left|right|[Bb]ig+|middle)\s*', '', text)
+    # ^{...} → ^content  and _{...} → _content
+    text = re.sub(r'\^\{([^{}]+)\}', r'^\1', text)
+    text = re.sub(r'_\{([^{}]+)\}', r'_\1', text)
+    # Remove \\ (line breaks in LaTeX) → newline
+    text = text.replace('\\\\', '\n')
+    # Remove remaining \command words
+    text = re.sub(r'\\[a-zA-Z]+\*?', '', text)
+    # Strip remaining lone backslashes
+    text = text.replace('\\', '')
+    # Strip LaTeX math delimiters $$ $  \[ \]  \( \)
+    text = re.sub(r'\$\$([^$]*)\$\$', r'\1', text, flags=re.DOTALL)
+    text = re.sub(r'\$([^$\n]*)\$', r'\1', text)
+    text = re.sub(r'\\\[([^\]]*)\\\]', r'\1', text, flags=re.DOTALL)
+    text = re.sub(r'\\\(([^)]*)\\\)', r'\1', text)
+    # Remove remaining bare braces
+    text = re.sub(r'\{([^{}]*)\}', r'\1', text)
+    # Collapse multiple spaces
+    text = re.sub(r'  +', ' ', text)
+    return text
+
 
 def _clean_ai_reply(text: str) -> str:
-    """يزيل وسوم HTML وكيانات HTML من ردود الذكاء الاصطناعي حتى لا تظهر كنص."""
+    """يزيل وسوم HTML ورموز LaTeX من ردود الذكاء الاصطناعي."""
     if not text:
         return text
     text = _HTML_TAG_RE.sub("", text)
     text = _HTML_ENTITY_RE.sub(lambda m: _HTML_ENTITIES.get(m.group(), m.group()), text)
+    text = _strip_latex(text)
     return text.strip()
 
 # ============================================================
@@ -364,6 +430,8 @@ _GEMINI_SYSTEM_BASE = (
     "جملة أو جملتان تكفيان في أغلب الأحوال. "
     "استثناء وحيد: إذا كان السؤال يتطلب حلاً تفصيلياً (مثل مسألة رياضية أو شرح درس) — وضّحي الخطوات الأساسية بإيجاز فقط بدون حشو أو تكرار. "
     "لا تكرري المعلومة، لا تختمي بعبارات فضفاضة، لا تطيلي بدون داعٍ. "
+    "⚠️ مهم جداً بخصوص الكتابة: لا تستخدمي رموز LaTeX أبداً (مثل $x^2$ أو \\frac أو \\sqrt). "
+    "اكتبي الرياضيات بشكل عادي مقروء: مثلاً اكتبي (1/2) بدل \\frac{1}{2}، و√3 بدل \\sqrt{3}، وx² بدل x^{2}. "
     "ما تذكرين إنك ذكاء اصطناعي أو بوت، تصرفي طبيعي."
 )
 
